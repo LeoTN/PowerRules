@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "powerrules"
-version = "0.1.2b0"
+version = "0.2.0b0"
 description = "A rule-based computer power state management tool"
 license = "MIT"
 license-files = ["LICENSE"]
