@@ -106,6 +106,3 @@ class Dummy_StopEvaluation(Exception):
 # Dummy model used to call the validation function
 class Dummy_Model(BaseModel):
     enabled: bool
-
-
-# REMOVE

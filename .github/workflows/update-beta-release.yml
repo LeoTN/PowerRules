@@ -23,6 +23,9 @@ on:
       - "LICENSE"
       - "README.md"
 
+permissions:
+  contents: read
+
 jobs:
   figure_out_release_version:
     name: Evaluate correct beta release version
