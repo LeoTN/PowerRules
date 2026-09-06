@@ -2,6 +2,14 @@ name: Update latest beta release
 
 on:
   workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Release type for the new beta release"
+        required: true
+        type: choice
+        options:
+          - PATCH
+          - MINOR
 
   push:
     branches:
@@ -23,10 +31,13 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     outputs:
       beta_version: ${{ steps.set_latest_release_version_id.outputs.final_beta_version }}
+      should_release: ${{ steps.set_latest_release_version_id.outputs.should_release }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -36,81 +47,195 @@ jobs:
       - name: Install packaging
         run: python3 -m pip install packaging --upgrade
 
-      - name: Determine latest release (semver)
+      - name: Determine release versions
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_RELEASE_TYPE: ${{ inputs.release_type }}
         run: |
           python3 - <<'EOF'
           import os
+          import re
           import subprocess
-          from packaging.version import parse
 
-          # Fetch up to 50 releases from GitHub
-          result = subprocess.run(
-              ["gh", "release", "list", "--repo", os.environ["GITHUB_REPOSITORY"], "--limit", "50"],
-              capture_output=True,
-              text=True,
-              check=True,
+          from packaging.version import Version
+
+          BETA_PATTERN = re.compile(
+              r"^(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\." r"(?P<patch>[0-9]+)b(?P<beta>[0-9]+)$"
+          )
+          STABLE_PATTERN = re.compile(
+              r"^(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<patch>[0-9]+)$"
           )
 
-          releases = result.stdout.splitlines()
-          versions = []
 
-          for line in releases:
-              if not line.strip():
-                  continue
-              tag = line.split()[0]
-              try:
-                  versions.append(parse(tag))
-              except Exception:
-                  # Skip tags that are not valid versions
-                  continue
+          def get_released_versions() -> tuple[Version, ...]:
+              result = subprocess.run(
+                  [
+                      "gh",
+                      "release",
+                      "list",
+                      "--repo",
+                      os.environ["GITHUB_REPOSITORY"],
+                  ],
+                  capture_output=True,
+                  text=True,
+                  check=True,
+              )
 
-          if not versions:
-              print("[ERROR] No valid releases found.")
-              exit(1)
+              released_versions = tuple()
 
-          latest_version = str(max(versions))
-          print(f"[INFO] Latest release (semver): {latest_version}")
+              for line in result.stdout.splitlines():
+                  if not line.strip():
+                      continue
 
-          env_file = os.environ.get("GITHUB_ENV")
-          with open(env_file, "a") as f:
-            f.write(f"LATEST_RELEASE={latest_version}\n")
-          EOF
+                  tag = line.split()[0]
 
-      - name: Figure out beta release version
+                  try:
+                      released_versions += (Version(tag),)
+                  except Exception:
+                      continue
+
+              return released_versions
+
+
+          def get_automatic_release_type() -> str | None:
+              commit_message = os.environ.get("COMMIT_MESSAGE", "")
+              commit_lines = commit_message.splitlines()
+
+              if not commit_lines:
+                  return None
+
+              # Only evaluate the subject of the commit that triggered the workflow
+              commit_subject = commit_lines[0].strip()
+
+              if re.fullmatch(r"fix(?:\([^)]+\))?:\s+.+", commit_subject):
+                  return "PATCH"
+
+              if re.fullmatch(r"feat(?:\([^)]+\))?:\s+.+", commit_subject):
+                  return "MINOR"
+
+              return None
+
+
+          released_versions = get_released_versions()
+
+          if not released_versions:
+              print("[ERROR] No released versions could be determined")
+              raise SystemExit(1)
+
+          latest_version = max(released_versions)
+
+
+          #############################################
+          # Increment the already existing beta version
+          #############################################
+
+          if BETA_PATTERN.fullmatch(str(latest_version)):
+              major = latest_version.major
+              minor = latest_version.minor
+              patch = latest_version.micro
+              pre_release = latest_version.pre
+
+              if pre_release is None or pre_release[0] != "b":
+                  print("[ERROR] Could not determine beta number")
+                  raise SystemExit(1)
+
+              beta = pre_release[1]
+              next_beta = f"{major}.{minor}.{patch}b{beta + 1}"
+
+              print(f"[INFO] Existing beta release found: {latest_version}")
+              print(f"[INFO] New beta version: {next_beta}")
+
+              with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+                  env_file.write(f"FINAL_BETA_VERSION={next_beta}\n")
+                  env_file.write("SHOULD_RELEASE=true\n")
+
+              raise SystemExit(0)
+
+
+          ################################################################################################################
+          # No existing beta version is available, determine the next beta version manually or based on the commit message
+          ################################################################################################################
+
+          # The workflow has been started manually
+          if os.environ["EVENT_NAME"] == "workflow_dispatch":
+              release_type = os.environ.get("MANUAL_RELEASE_TYPE")
+
+              if release_type not in {"PATCH", "MINOR"}:
+                  print("[ERROR] Invalid manual release type")
+                  raise SystemExit(1)
+
+              print(f"[INFO] Manual release type selected: {release_type}")
+
+          # The workflow has been started automatically (e.g., by a commit)
+          else:
+              # Determine the release type based on the commit message subject (fix: -> PATCH, feat: -> MINOR)
+              release_type = get_automatic_release_type()
+
+              if release_type is None:
+                  print(
+                      "[INFO] Commit message does not define a release type (fix: -> PATCH, feat: -> MINOR)"
+                  )
+                  print("[INFO] No beta release will be created")
+
+                  with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+                      env_file.write("SHOULD_RELEASE=false\n")
+
+                  raise SystemExit(0)
+
+              print(f"[INFO] Release type derived from commit message: {release_type}")
+
+
+          # Determine the latest stable release
+          latest_stable = max(
+              (
+                  version
+                  for version in released_versions
+                  if STABLE_PATTERN.fullmatch(str(version))
+              ),
+              default=None,
+          )
+
+          if latest_stable is None:
+              print("[ERROR] No stable release could be determined")
+              raise SystemExit(1)
+
+          if release_type == "PATCH":
+              # Increment patch version +1
+              next_version = (
+                  f"{latest_stable.major}.{latest_stable.minor}.{latest_stable.micro + 1}b0"
+              )
+          elif release_type == "MINOR":
+              # Increment minor version +1
+              next_version = f"{latest_stable.major}.{latest_stable.minor + 1}.0b0"
+          else:
+              print(f"[ERROR] Unsupported release type: {release_type}")
+              raise SystemExit(1)
+
+
+          print(f"[INFO] Latest stable release: {latest_stable}")
+          print(f"[INFO] New beta version: {next_version}")
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"FINAL_BETA_VERSION={next_version}\n")
+              env_file.write("SHOULD_RELEASE=true\n")
+
+      - name: Set release version output
         id: set_latest_release_version_id
         run: |
-          # Check if the current version is already a beta
-          if [[ "$LATEST_RELEASE" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)b([0-9]+)$ ]]; then
-            MAJOR="${BASH_REMATCH[1]}"
-            MINOR="${BASH_REMATCH[2]}"
-            PATCH="${BASH_REMATCH[3]}"
-            BETA="${BASH_REMATCH[4]}"
-
-            # Increment beta version
-            NEXT_BETA=$((BETA + 1))
-            final_beta_version="${MAJOR}.${MINOR}.${PATCH}b${NEXT_BETA}"
-
-          # If current version is a stable release
-          elif [[ "$LATEST_RELEASE" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            MAJOR="${BASH_REMATCH[1]}"
-            MINOR="${BASH_REMATCH[2]}"
-            PATCH="${BASH_REMATCH[3]}"
-
-            # Increment patch and start beta at 0
-            PATCH=$((PATCH + 1))
-            final_beta_version="${MAJOR}.${MINOR}.${PATCH}b0"
-
+          if [[ "${SHOULD_RELEASE}" == "true" ]]; then
+            echo "[INFO] Beta release will be created: ${FINAL_BETA_VERSION}"
+            echo "final_beta_version=${FINAL_BETA_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
           else
-            echo "[ERROR] Could not parse latest release version: $LATEST_RELEASE"
-            exit 1
+            echo "[INFO] No beta release will be created"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
           fi
-
-          echo "[INFO] New beta version: $final_beta_version"
-          echo "final_beta_version=$final_beta_version" >> $GITHUB_OUTPUT
 
   start_ci_workflow:
     name: Launch release workflow
     needs: figure_out_release_version
+    if: needs.figure_out_release_version.outputs.should_release == 'true'
     permissions:
       contents: write
     uses: ./.github/workflows/release.yml
