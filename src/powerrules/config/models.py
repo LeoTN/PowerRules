@@ -29,7 +29,7 @@ class ProcessConditionConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    running: StrictBool
+    exists: StrictBool
     match: MatchConfiguration = Field(default_factory=MatchConfiguration)
 
 

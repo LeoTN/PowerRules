@@ -23,7 +23,7 @@ rules:
       and:
         - process:
             name: "backup.exe"
-            running: false
+            exists: false
         - datetime:
             between:
                 start: "23:00"
@@ -71,7 +71,7 @@ rules:
       and:
         - process:
             name: "backup.exe"
-            running: false
+            exists: false
         - datetime:
             between:
                 start: "23:00"

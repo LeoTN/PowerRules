@@ -41,7 +41,7 @@ rules:
       and:
         - process:
             name: "backup.exe"
-            running: false
+            exists: false
         - window:
             title: "Backup Completed"
             exists: true
@@ -90,7 +90,7 @@ pwru policy run --policy my-policy.yaml
 | Feature | Description |
 |---------|-------------|
 | **Rule-based power management** | Define ordered rules with conditions and power actions |
-| **Process conditions** | Match rules based on whether a process is running |
+| **Process conditions** | Match rules based on whether a process exists |
 | **Time conditions** | Match time ranges and weekdays |
 | **Window conditions** | Match window titles |
 | **Logical conditions** | Combine conditions using `and`, `or`, and `not` |

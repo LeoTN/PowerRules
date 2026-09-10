@@ -7,13 +7,13 @@ from powerrules.conditions.process import ProcessCondition
 from powerrules.engine.exceptions import ConditionEvaluationError
 
 
-def test_process_condition_matches_exact_running_process_case_sensitive() -> None:
+def test_process_condition_matches_exact_existing_process_case_sensitive() -> None:
     with patch("powerrules.providers.process.ProcessProvider") as mock_provider:
         mock_provider.get_process_names.return_value = ["test.exe"]
 
         condition = ProcessCondition(
             process_name="test.exe",
-            expected_running=True,
+            expected_exists=True,
             process_provider=mock_provider,
             match_type=MatchType.EXACT,
             case_sensitive=True,
@@ -22,7 +22,7 @@ def test_process_condition_matches_exact_running_process_case_sensitive() -> Non
         assert condition.evaluate() is True
 
 
-def test_process_condition_does_not_match_exact_running_process_case_sensitive() -> (
+def test_process_condition_does_not_match_exact_existing_process_case_sensitive() -> (
     None
 ):
     with patch("powerrules.providers.process.ProcessProvider") as mock_provider:
@@ -30,7 +30,7 @@ def test_process_condition_does_not_match_exact_running_process_case_sensitive()
 
         condition = ProcessCondition(
             process_name="test.exe",
-            expected_running=False,
+            expected_exists=False,
             process_provider=mock_provider,
             match_type=MatchType.EXACT,
             case_sensitive=True,
@@ -39,13 +39,13 @@ def test_process_condition_does_not_match_exact_running_process_case_sensitive()
     assert condition.evaluate() is False
 
 
-def test_process_condition_matches_exact_running_process_case_insensitive() -> None:
+def test_process_condition_matches_exact_existing_process_case_insensitive() -> None:
     with patch("powerrules.providers.process.ProcessProvider") as mock_provider:
         mock_provider.get_process_names.return_value = ["test.exe"]
 
         condition = ProcessCondition(
             process_name="TEST.exe",
-            expected_running=True,
+            expected_exists=True,
             process_provider=mock_provider,
             match_type=MatchType.EXACT,
             case_sensitive=False,
@@ -54,7 +54,7 @@ def test_process_condition_matches_exact_running_process_case_insensitive() -> N
         assert condition.evaluate() is True
 
 
-def test_process_condition_does_not_match_exact_running_process_case_insensitive() -> (
+def test_process_condition_does_not_match_exact_existing_process_case_insensitive() -> (
     None
 ):
     with patch("powerrules.providers.process.ProcessProvider") as mock_provider:
@@ -62,7 +62,7 @@ def test_process_condition_does_not_match_exact_running_process_case_insensitive
 
         condition = ProcessCondition(
             process_name="TEST.exe",
-            expected_running=False,
+            expected_exists=False,
             process_provider=mock_provider,
             match_type=MatchType.EXACT,
             case_sensitive=False,
@@ -71,13 +71,13 @@ def test_process_condition_does_not_match_exact_running_process_case_insensitive
     assert condition.evaluate() is False
 
 
-def test_process_condition_matches_regex_running_process_case_sensitive() -> None:
+def test_process_condition_matches_regex_existing_process_case_sensitive() -> None:
     with patch("powerrules.providers.process.ProcessProvider") as mock_provider:
         mock_provider.get_process_names.return_value = ["test.exe"]
 
         condition = ProcessCondition(
             process_name=".*\\.exe",
-            expected_running=True,
+            expected_exists=True,
             process_provider=mock_provider,
             match_type=MatchType.REGEX,
             case_sensitive=True,
@@ -86,7 +86,7 @@ def test_process_condition_matches_regex_running_process_case_sensitive() -> Non
         assert condition.evaluate() is True
 
 
-def test_process_condition_does_not_match_regex_running_process_case_sensitive() -> (
+def test_process_condition_does_not_match_regex_existing_process_case_sensitive() -> (
     None
 ):
     with patch("powerrules.providers.process.ProcessProvider") as mock_provider:
@@ -94,7 +94,7 @@ def test_process_condition_does_not_match_regex_running_process_case_sensitive()
 
         condition = ProcessCondition(
             process_name=".*\\.executable",
-            expected_running=True,
+            expected_exists=True,
             process_provider=mock_provider,
             match_type=MatchType.REGEX,
             case_sensitive=True,
@@ -103,13 +103,13 @@ def test_process_condition_does_not_match_regex_running_process_case_sensitive()
         assert condition.evaluate() is False
 
 
-def test_process_condition_matches_regex_running_process_case_insensitive() -> None:
+def test_process_condition_matches_regex_existing_process_case_insensitive() -> None:
     with patch("powerrules.providers.process.ProcessProvider") as mock_provider:
         mock_provider.get_process_names.return_value = ["test.exe"]
 
         condition = ProcessCondition(
             process_name=".*\\.exe",
-            expected_running=True,
+            expected_exists=True,
             process_provider=mock_provider,
             match_type=MatchType.REGEX,
             case_sensitive=False,
@@ -118,7 +118,7 @@ def test_process_condition_matches_regex_running_process_case_insensitive() -> N
         assert condition.evaluate() is True
 
 
-def test_process_condition_does_not_match_regex_running_process_case_insensitive() -> (
+def test_process_condition_does_not_match_regex_existing_process_case_insensitive() -> (
     None
 ):
     with patch("powerrules.providers.process.ProcessProvider") as mock_provider:
@@ -126,7 +126,7 @@ def test_process_condition_does_not_match_regex_running_process_case_insensitive
 
         condition = ProcessCondition(
             process_name=".*\\.executable",
-            expected_running=True,
+            expected_exists=True,
             process_provider=mock_provider,
             match_type=MatchType.REGEX,
             case_sensitive=False,
@@ -141,7 +141,7 @@ def test_process_condition_raises_evaluation_error() -> None:
 
     condition = ProcessCondition(
         process_name="test.exe",
-        expected_running=True,
+        expected_exists=True,
         process_provider=mock_provider,
         match_type=MatchType.EXACT,
         case_sensitive=False,
@@ -153,5 +153,5 @@ def test_process_condition_raises_evaluation_error() -> None:
 
     # Make sure the exception message is used from the underlying exception
     assert str(exc_info.value) == (
-        "Failed to determine whether process 'test.exe' is running"
+        "Failed to determine whether process 'test.exe' exists"
     )

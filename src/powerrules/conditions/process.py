@@ -7,14 +7,14 @@ class ProcessCondition:
     def __init__(
         self,
         process_name: str,
-        expected_running: bool,
-        # Basically a wrapper object to interact with the OS to provide information about the running processes
+        expected_exists: bool,
+        # Basically a wrapper object to interact with the OS to provide information about the existing processes
         process_provider: ProcessProvider,
         match_type: MatchType = MatchType.EXACT,
         case_sensitive: bool = True,
     ):
         self.process_name = process_name
-        self.expected_running = expected_running
+        self.expected_exists = expected_exists
         self.process_provider = process_provider
         self.matcher = StringMatcher(process_name, match_type, case_sensitive)
 
@@ -30,12 +30,12 @@ class ProcessCondition:
         try:
             process_names = self.process_provider.get_process_names()
 
-            is_running = any(
+            is_existing = any(
                 self.matcher.matches(process_name) for process_name in process_names
             )
         except Exception as e:
             raise ConditionEvaluationError(
-                f"Failed to determine whether process '{self.process_name}' is running"
+                f"Failed to determine whether process '{self.process_name}' exists"
             ) from e
 
-        return is_running == self.expected_running
+        return is_existing == self.expected_exists

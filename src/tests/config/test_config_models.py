@@ -20,7 +20,7 @@ def test_rule_set_configuration_accepts_valid_rule() -> None:
                             {
                                 "process": {
                                     "name": "backup.exe",
-                                    "running": False,
+                                    "exists": False,
                                 }
                             },
                             {
@@ -58,7 +58,7 @@ def test_and_condition_requires_at_least_two_conditions() -> None:
                                 {
                                     "process": {
                                         "name": "backup.exe",
-                                        "running": False,
+                                        "exists": False,
                                     }
                                     # Missing second condition
                                 }
@@ -83,7 +83,7 @@ def test_not_condition_accepts_single_condition() -> None:
                         "not": {
                             "process": {
                                 "name": "backup.exe",
-                                "running": True,
+                                "exists": True,
                             }
                         }
                     },
@@ -108,7 +108,7 @@ def test_invalid_action_is_rejected() -> None:
                         "conditions": {
                             "process": {
                                 "name": "backup.exe",
-                                "running": False,
+                                "exists": False,
                             }
                         },
                         "action": {
@@ -131,7 +131,7 @@ def test_unknown_action_field_is_rejected() -> None:
                         "conditions": {
                             "process": {
                                 "name": "backup.exe",
-                                "running": False,
+                                "exists": False,
                             }
                         },
                         "action": {

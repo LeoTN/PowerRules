@@ -99,7 +99,7 @@ class PowerRulesRuntime:
         rule_set = ConfigurationBuilder(
             # Information about the current date and time
             clock_provider=providers.clock,
-            # Information about running processes
+            # Information about processes
             process_provider=providers.process,
             # Information about windows (not the OS :D)
             window_provider=providers.window,

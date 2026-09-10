@@ -16,7 +16,7 @@ rules:
     conditions:
       process:
         name: "backup.exe"
-        running: false
+        exists: false
     action:
       type: shutdown
 """,
@@ -40,7 +40,7 @@ rules:
       and:
         - process:
             name: "backup.exe"
-            running: false
+            exists: false
         - or:
             - datetime:
                 between:
@@ -48,7 +48,7 @@ rules:
                   end: "6"
             - process:
                 name: "maintenance.exe"
-                running: true
+                exists: true
     action:
       type: shutdown
 """,
@@ -75,7 +75,7 @@ rules:
     conditions:
       process:
         name: "backup.exe"
-        running: "false"
+        exists: "false"
     action:
       type: shutdown
 """,

@@ -131,16 +131,16 @@
             "additionalProperties": false,
             "required": [
                 "name",
-                "running"
+                "exists"
             ],
             "properties": {
                 "name": {
                     "type": "string",
                     "description": "Name of the process to check."
                 },
-                "running": {
+                "exists": {
                     "type": "boolean",
-                    "description": "Whether the process is expected to be running."
+                    "description": "Whether the process is expected to exist."
                 },
                 "match": {
                     "$ref": "#/$defs/match",

@@ -45,7 +45,7 @@ rules:
     conditions:
       process:
         name: "backup.exe"
-        running: false
+        exists: false
     action:
       type: shutdown
 """,
@@ -70,7 +70,7 @@ rules:
     conditions:
       process:
         name: "backup.exe"
-        running: "false"
+        exists: "false"
     action:
       type: shutdown
 """,
@@ -94,7 +94,7 @@ rules:
     conditions:
       process:
         name: "backup.exe"
-        running: false
+        exists: false
     action:
       type: shutdown
 
@@ -103,7 +103,7 @@ rules:
     conditions:
       process:
         name: "maintenance.exe"
-        running: false
+        exists: false
     action:
       type: sleep
 """,

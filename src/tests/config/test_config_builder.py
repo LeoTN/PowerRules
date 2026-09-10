@@ -39,7 +39,7 @@ def test_configuration_builder_builds_rule_set() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
                         match=MatchConfiguration(
                             type=MatchType.EXACT, case_sensitive=True
                         ),
@@ -74,7 +74,7 @@ def test_configuration_builder_preserves_rule_properties() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
                         match=MatchConfiguration(
                             type=MatchType.EXACT, case_sensitive=True
                         ),
@@ -112,7 +112,7 @@ def test_configuration_builder_builds_process_condition() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
                         match=MatchConfiguration(
                             type=MatchType.EXACT, case_sensitive=True
                         ),
@@ -136,7 +136,7 @@ def test_configuration_builder_builds_process_condition() -> None:
 
     assert isinstance(rule.condition, ProcessCondition)
     assert rule.condition.process_name == "backup.exe"
-    assert rule.condition.expected_running is False
+    assert rule.condition.expected_exists is False
     assert rule.condition.process_provider is process_provider
 
 
@@ -272,7 +272,7 @@ def test_configuration_builder_builds_shutdown_action() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
                         match=MatchConfiguration(
                             type=MatchType.EXACT, case_sensitive=True
                         ),
@@ -306,7 +306,7 @@ def test_configuration_builder_builds_sleep_action() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
                         match=MatchConfiguration(
                             type=MatchType.EXACT, case_sensitive=True
                         ),
@@ -340,7 +340,7 @@ def test_configuration_builder_builds_hibernate_action() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
                         match=MatchConfiguration(
                             type=MatchType.EXACT, case_sensitive=True
                         ),
@@ -374,7 +374,7 @@ def test_configuration_builder_builds_reboot_action() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
                         match=MatchConfiguration(
                             type=MatchType.EXACT, case_sensitive=True
                         ),
@@ -411,7 +411,7 @@ def test_configuration_builder_preserves_rule_order() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="first.exe",
-                        running=False,
+                        exists=False,
                         match=MatchConfiguration(
                             type=MatchType.EXACT, case_sensitive=True
                         ),
@@ -426,7 +426,7 @@ def test_configuration_builder_preserves_rule_order() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="second.exe",
-                        running=False,
+                        exists=False,
                         match=MatchConfiguration(
                             type=MatchType.EXACT, case_sensitive=True
                         ),
@@ -464,7 +464,7 @@ def test_configuration_builder_builds_nested_conditions() -> None:
                         ConditionConfiguration(
                             process=ProcessConditionConfiguration(
                                 name="backup.exe",
-                                running=False,
+                                exists=False,
                                 match=MatchConfiguration(
                                     type=MatchType.EXACT, case_sensitive=True
                                 ),
@@ -483,7 +483,7 @@ def test_configuration_builder_builds_nested_conditions() -> None:
                                 ConditionConfiguration(
                                     process=ProcessConditionConfiguration(
                                         name="maintenance.exe",
-                                        running=True,
+                                        exists=True,
                                         match=MatchConfiguration(
                                             type=MatchType.EXACT, case_sensitive=True
                                         ),

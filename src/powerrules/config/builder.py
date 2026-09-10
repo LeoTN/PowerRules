@@ -132,7 +132,7 @@ class ConfigurationBuilder:
         """
         return ProcessCondition(
             process_name=configuration.name,
-            expected_running=configuration.running,
+            expected_exists=configuration.exists,
             process_provider=self.process_provider,
             match_type=configuration.match.type,
             case_sensitive=configuration.match.case_sensitive,
