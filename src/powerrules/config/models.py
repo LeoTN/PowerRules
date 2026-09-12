@@ -11,6 +11,16 @@ from pydantic import (
 )
 
 from powerrules.conditions.datetime import Weekday
+from powerrules.conditions.matcher import MatchType
+
+
+class MatchConfiguration(BaseModel):
+    """Configuration for a match configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: MatchType = MatchType.EXACT
+    case_sensitive: bool = True
 
 
 class ProcessConditionConfiguration(BaseModel):
@@ -19,7 +29,8 @@ class ProcessConditionConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    running: StrictBool
+    exists: StrictBool
+    match: MatchConfiguration = Field(default_factory=MatchConfiguration)
 
 
 class TimeRangeConfiguration(BaseModel):
@@ -85,6 +96,7 @@ class WindowConditionConfiguration(BaseModel):
 
     title: str
     exists: StrictBool
+    match: MatchConfiguration = Field(default_factory=MatchConfiguration)
 
 
 class ConditionConfiguration(BaseModel):

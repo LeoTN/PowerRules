@@ -132,8 +132,10 @@ class ConfigurationBuilder:
         """
         return ProcessCondition(
             process_name=configuration.name,
-            expected_running=configuration.running,
+            expected_exists=configuration.exists,
             process_provider=self.process_provider,
+            match_type=configuration.match.type,
+            case_sensitive=configuration.match.case_sensitive,
         )
 
     def _build_datetime_condition(
@@ -180,6 +182,8 @@ class ConfigurationBuilder:
             window_title=configuration.title,
             expected_exists=configuration.exists,
             window_provider=self.window_provider,
+            match_type=configuration.match.type,
+            case_sensitive=configuration.match.case_sensitive,
         )
 
     def _build_action(self, configuration: ActionConfiguration) -> Action:

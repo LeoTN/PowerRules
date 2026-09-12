@@ -1,3 +1,4 @@
+from powerrules.conditions.matcher import MatchType, StringMatcher
 from powerrules.engine.exceptions import (
     ConditionEvaluationError,
     ConditionEvaluationProviderNotAvailableError,
@@ -12,10 +13,17 @@ class WindowCondition:
         expected_exists: bool,
         # Basically a wrapper object to interact with the OS to provide information about the existing windows
         window_provider: WindowProvider,
+        match_type: MatchType = MatchType.EXACT,
+        case_sensitive: bool = True,
     ):
         self.window_title = window_title
         self.expected_exists = expected_exists
         self.window_provider = window_provider
+        self.matcher = StringMatcher(
+            pattern=window_title,
+            match_type=match_type,
+            case_sensitive=case_sensitive,
+        )
 
     def evaluate(self) -> bool:
         """Evaluate whether the configured window is in the expected state.
@@ -33,7 +41,9 @@ class WindowCondition:
             )
 
         try:
-            window_exists = self.window_provider.window_exists(self.window_title)
+            window_titles = self.window_provider.get_window_titles()
+
+            window_exists = any(self.matcher.matches(title) for title in window_titles)
         except Exception as e:
             raise ConditionEvaluationError(
                 f"Failed to determine whether window '{self.window_title}' exists"

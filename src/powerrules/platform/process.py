@@ -5,17 +5,10 @@ import psutil
 class PsUtilProcessProvider:
     """Provide process information on Windows, Linux and macOS."""
 
-    def is_running(self, process_name: str) -> bool:
-        """Return whether a process with the given name is running.
-
-        Args:
-            process_name: Name of the process to search for.
+    def get_process_names(self) -> tuple[str, ...]:
+        """Return a list of all currently existing process names.
 
         Returns:
-            True if at least one matching process is running, otherwise False.
+            A tuple of process names.
         """
-        for process in psutil.process_iter(["name"]):
-            if process.info["name"] == process_name:
-                return True
-
-        return False
+        return tuple(process.info["name"] for process in psutil.process_iter(["name"]))

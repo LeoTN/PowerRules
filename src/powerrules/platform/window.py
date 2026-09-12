@@ -21,22 +21,16 @@ class PyWinCtlWindowProvider:
                 err=True,
             )
 
-    def window_exists(self, window_title: str) -> bool:
-        """Return whether a window with the given title exists.
-
-        Args:
-            window_title: Title of the window to search for.
+    def get_window_titles(self) -> tuple[str, ...]:
+        """Return a list of all currently open window titles.
 
         Returns:
-            True if at least one window has the exact title, otherwise False.
+            A tuple of window titles.
 
         Raises:
             RuntimeError: If the window provider is not available.
         """
-
         if not self.is_available or self._pywinctl is None:
             raise RuntimeError("Window provider is not available")
 
-        return any(
-            window.title == window_title for window in self._pywinctl.getAllWindows()
-        )
+        return tuple(window.title for window in self._pywinctl.getAllWindows())

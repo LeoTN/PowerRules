@@ -37,10 +37,12 @@
                     "description": "Whether the rule is enabled."
                 },
                 "conditions": {
-                    "$ref": "#/$defs/condition"
+                    "$ref": "#/$defs/condition",
+                    "description": "Condition that must be satisfied for the rule to match."
                 },
                 "action": {
-                    "$ref": "#/$defs/action"
+                    "$ref": "#/$defs/action",
+                    "description": "Action to perform when the rule matches."
                 }
             }
         },
@@ -55,6 +57,7 @@
                         "and": {
                             "type": "array",
                             "minItems": 2,
+                            "description": "List of conditions that must all be satisfied.",
                             "items": {
                                 "$ref": "#/$defs/condition"
                             }
@@ -69,6 +72,7 @@
                         "or": {
                             "type": "array",
                             "minItems": 2,
+                            "description": "List of conditions where at least one must be satisfied.",
                             "items": {
                                 "$ref": "#/$defs/condition"
                             }
@@ -81,7 +85,8 @@
                     ],
                     "properties": {
                         "not": {
-                            "$ref": "#/$defs/condition"
+                            "$ref": "#/$defs/condition",
+                            "description": "Condition that must not be satisfied."
                         }
                     }
                 },
@@ -91,7 +96,8 @@
                     ],
                     "properties": {
                         "process": {
-                            "$ref": "#/$defs/processCondition"
+                            "$ref": "#/$defs/processCondition",
+                            "description": "Condition based on the state of a process."
                         }
                     }
                 },
@@ -101,7 +107,8 @@
                     ],
                     "properties": {
                         "datetime": {
-                            "$ref": "#/$defs/dateTimeCondition"
+                            "$ref": "#/$defs/dateTimeCondition",
+                            "description": "Condition based on the current date or time."
                         }
                     }
                 },
@@ -111,7 +118,8 @@
                     ],
                     "properties": {
                         "window": {
-                            "$ref": "#/$defs/windowCondition"
+                            "$ref": "#/$defs/windowCondition",
+                            "description": "Condition based on the presence of a window."
                         }
                     }
                 }
@@ -123,16 +131,20 @@
             "additionalProperties": false,
             "required": [
                 "name",
-                "running"
+                "exists"
             ],
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Name of the process."
+                    "description": "Name of the process to check."
                 },
-                "running": {
+                "exists": {
                     "type": "boolean",
-                    "description": "Whether the process is expected to be running."
+                    "description": "Whether the process is expected to exist."
+                },
+                "match": {
+                    "$ref": "#/$defs/match",
+                    "description": "Defines how the process name should be matched."
                 }
             }
         },
@@ -145,7 +157,8 @@
                     ],
                     "properties": {
                         "between": {
-                            "$ref": "#/$defs/timeRange"
+                            "$ref": "#/$defs/timeRange",
+                            "description": "Time range during which the condition is satisfied."
                         }
                     }
                 },
@@ -157,6 +170,7 @@
                         "weekday": {
                             "type": "array",
                             "minItems": 1,
+                            "description": "List of weekdays on which the condition is satisfied.",
                             "items": {
                                 "type": "string",
                                 "enum": [
@@ -184,10 +198,12 @@
             ],
             "properties": {
                 "start": {
-                    "$ref": "#/$defs/time"
+                    "$ref": "#/$defs/time",
+                    "description": "Start time of the range."
                 },
                 "end": {
-                    "$ref": "#/$defs/time"
+                    "$ref": "#/$defs/time",
+                    "description": "End time of the range."
                 }
             }
         },
@@ -206,12 +222,37 @@
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "Exact title of the window."
+                    "description": "Title of the window to check."
                 },
                 "exists": {
                     "type": "boolean",
                     "default": true,
                     "description": "Whether the window is expected to exist."
+                },
+                "match": {
+                    "$ref": "#/$defs/match",
+                    "description": "Defines how the window title should be matched."
+                }
+            }
+        },
+        "match": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Defines how the value should be matched against the target. By default, an exact, case-sensitive match is used.",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "exact",
+                        "regex"
+                    ],
+                    "default": "exact",
+                    "description": "Whether the match should be exact or use a regular expression."
+                },
+                "case_sensitive": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Whether uppercase and lowercase letters should be treated differently."
                 }
             }
         },
@@ -229,7 +270,8 @@
                         "sleep",
                         "hibernate",
                         "reboot"
-                    ]
+                    ],
+                    "description": "Action to perform when the rule matches."
                 }
             }
         }

@@ -1,4 +1,5 @@
 from datetime import datetime, time
+from unittest.mock import patch
 
 from powerrules.actions.power import (
     HibernateAction,
@@ -7,6 +8,7 @@ from powerrules.actions.power import (
     SleepAction,
 )
 from powerrules.conditions.datetime import DateTimeCondition, TimeRange, Weekday
+from powerrules.conditions.matcher import MatchType
 from powerrules.conditions.operators import AndCondition, OrCondition
 from powerrules.conditions.process import ProcessCondition
 from powerrules.conditions.window import WindowCondition
@@ -15,6 +17,7 @@ from powerrules.config.models import (
     ActionConfiguration,
     ConditionConfiguration,
     DateTimeConditionConfiguration,
+    MatchConfiguration,
     ProcessConditionConfiguration,
     RuleConfiguration,
     RuleSetConfiguration,
@@ -25,8 +28,6 @@ from powerrules.engine.models import RuleSet
 from tests.dummies import (
     Dummy_ClockProvider,
     Dummy_PowerProvider,
-    Dummy_ProcessProvider,
-    Dummy_WindowProvider,
 )
 
 
@@ -38,7 +39,10 @@ def test_configuration_builder_builds_rule_set() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
+                        match=MatchConfiguration(
+                            type=MatchType.EXACT, case_sensitive=True
+                        ),
                     )
                 ),
                 action=ActionConfiguration(
@@ -50,10 +54,8 @@ def test_configuration_builder_builds_rule_set() -> None:
 
     builder = ConfigurationBuilder(
         clock_provider=Dummy_ClockProvider(datetime(2026, 8, 22, 12, 0)),
-        process_provider=Dummy_ProcessProvider(given_is_running=True),
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=Dummy_PowerProvider(),
     )
 
@@ -72,7 +74,10 @@ def test_configuration_builder_preserves_rule_properties() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
+                        match=MatchConfiguration(
+                            type=MatchType.EXACT, case_sensitive=True
+                        ),
                     )
                 ),
                 action=ActionConfiguration(
@@ -84,10 +89,8 @@ def test_configuration_builder_preserves_rule_properties() -> None:
 
     builder = ConfigurationBuilder(
         clock_provider=Dummy_ClockProvider(datetime(2026, 8, 22, 12, 0)),
-        process_provider=Dummy_ProcessProvider(given_is_running=True),
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=Dummy_PowerProvider(),
     )
 
@@ -100,7 +103,7 @@ def test_configuration_builder_preserves_rule_properties() -> None:
 
 
 def test_configuration_builder_builds_process_condition() -> None:
-    process_provider = Dummy_ProcessProvider(given_is_running=True)
+    process_provider = patch("powerrules.providers.process.ProcessProvider").start()
 
     configuration = RuleSetConfiguration(
         rules=[
@@ -109,7 +112,10 @@ def test_configuration_builder_builds_process_condition() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
+                        match=MatchConfiguration(
+                            type=MatchType.EXACT, case_sensitive=True
+                        ),
                     )
                 ),
                 action=ActionConfiguration(
@@ -122,9 +128,7 @@ def test_configuration_builder_builds_process_condition() -> None:
     builder = ConfigurationBuilder(
         clock_provider=Dummy_ClockProvider(datetime(2026, 8, 22, 12, 0)),
         process_provider=process_provider,
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=Dummy_PowerProvider(),
     )
 
@@ -132,7 +136,7 @@ def test_configuration_builder_builds_process_condition() -> None:
 
     assert isinstance(rule.condition, ProcessCondition)
     assert rule.condition.process_name == "backup.exe"
-    assert rule.condition.expected_running is False
+    assert rule.condition.expected_exists is False
     assert rule.condition.process_provider is process_provider
 
 
@@ -165,10 +169,8 @@ def test_configuration_builder_builds_datetime_between_condition() -> None:
 
     builder = ConfigurationBuilder(
         clock_provider=clock_provider,
-        process_provider=Dummy_ProcessProvider(given_is_running=True),
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=Dummy_PowerProvider(),
     )
 
@@ -204,10 +206,8 @@ def test_configuration_builder_builds_datetime_weekday_condition() -> None:
 
     builder = ConfigurationBuilder(
         clock_provider=Dummy_ClockProvider(datetime(2026, 8, 22, 12, 0)),
-        process_provider=Dummy_ProcessProvider(given_is_running=True),
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=Dummy_PowerProvider(),
     )
 
@@ -229,7 +229,11 @@ def test_configuration_builder_builds_window_condition() -> None:
                 name="Window test rule",
                 conditions=ConditionConfiguration(
                     window=WindowConditionConfiguration(
-                        title="My window title", exists=True
+                        title="My window title",
+                        exists=True,
+                        match=MatchConfiguration(
+                            type=MatchType.EXACT, case_sensitive=True
+                        ),
                     )
                 ),
                 action=ActionConfiguration(
@@ -241,10 +245,8 @@ def test_configuration_builder_builds_window_condition() -> None:
 
     builder = ConfigurationBuilder(
         clock_provider=Dummy_ClockProvider(datetime(2026, 8, 30, 12, 0)),
-        process_provider=Dummy_ProcessProvider(given_is_running=True),
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=Dummy_PowerProvider(),
     )
 
@@ -270,7 +272,10 @@ def test_configuration_builder_builds_shutdown_action() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
+                        match=MatchConfiguration(
+                            type=MatchType.EXACT, case_sensitive=True
+                        ),
                     )
                 ),
                 action=ActionConfiguration(type="shutdown"),
@@ -280,10 +285,8 @@ def test_configuration_builder_builds_shutdown_action() -> None:
 
     builder = ConfigurationBuilder(
         clock_provider=Dummy_ClockProvider(datetime(2026, 8, 22, 12, 0)),
-        process_provider=Dummy_ProcessProvider(given_is_running=True),
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=power_provider,
     )
 
@@ -303,7 +306,10 @@ def test_configuration_builder_builds_sleep_action() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
+                        match=MatchConfiguration(
+                            type=MatchType.EXACT, case_sensitive=True
+                        ),
                     )
                 ),
                 action=ActionConfiguration(type="sleep"),
@@ -313,10 +319,8 @@ def test_configuration_builder_builds_sleep_action() -> None:
 
     builder = ConfigurationBuilder(
         clock_provider=Dummy_ClockProvider(datetime(2026, 8, 22, 12, 0)),
-        process_provider=Dummy_ProcessProvider(given_is_running=True),
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=power_provider,
     )
 
@@ -336,7 +340,10 @@ def test_configuration_builder_builds_hibernate_action() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
+                        match=MatchConfiguration(
+                            type=MatchType.EXACT, case_sensitive=True
+                        ),
                     )
                 ),
                 action=ActionConfiguration(type="hibernate"),
@@ -346,10 +353,8 @@ def test_configuration_builder_builds_hibernate_action() -> None:
 
     builder = ConfigurationBuilder(
         clock_provider=Dummy_ClockProvider(datetime(2026, 8, 22, 12, 0)),
-        process_provider=Dummy_ProcessProvider(given_is_running=True),
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=power_provider,
     )
 
@@ -369,7 +374,10 @@ def test_configuration_builder_builds_reboot_action() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="backup.exe",
-                        running=False,
+                        exists=False,
+                        match=MatchConfiguration(
+                            type=MatchType.EXACT, case_sensitive=True
+                        ),
                     )
                 ),
                 action=ActionConfiguration(type="reboot"),
@@ -379,10 +387,8 @@ def test_configuration_builder_builds_reboot_action() -> None:
 
     builder = ConfigurationBuilder(
         clock_provider=Dummy_ClockProvider(datetime(2026, 8, 22, 12, 0)),
-        process_provider=Dummy_ProcessProvider(given_is_running=True),
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=power_provider,
     )
 
@@ -405,7 +411,10 @@ def test_configuration_builder_preserves_rule_order() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="first.exe",
-                        running=False,
+                        exists=False,
+                        match=MatchConfiguration(
+                            type=MatchType.EXACT, case_sensitive=True
+                        ),
                     )
                 ),
                 action=ActionConfiguration(
@@ -417,7 +426,10 @@ def test_configuration_builder_preserves_rule_order() -> None:
                 conditions=ConditionConfiguration(
                     process=ProcessConditionConfiguration(
                         name="second.exe",
-                        running=False,
+                        exists=False,
+                        match=MatchConfiguration(
+                            type=MatchType.EXACT, case_sensitive=True
+                        ),
                     )
                 ),
                 action=ActionConfiguration(
@@ -429,10 +441,8 @@ def test_configuration_builder_preserves_rule_order() -> None:
 
     builder = ConfigurationBuilder(
         clock_provider=Dummy_ClockProvider(datetime(2026, 8, 22, 12, 0)),
-        process_provider=Dummy_ProcessProvider(given_is_running=True),
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=Dummy_PowerProvider(),
     )
 
@@ -454,7 +464,10 @@ def test_configuration_builder_builds_nested_conditions() -> None:
                         ConditionConfiguration(
                             process=ProcessConditionConfiguration(
                                 name="backup.exe",
-                                running=False,
+                                exists=False,
+                                match=MatchConfiguration(
+                                    type=MatchType.EXACT, case_sensitive=True
+                                ),
                             )
                         ),
                         ConditionConfiguration(
@@ -470,7 +483,10 @@ def test_configuration_builder_builds_nested_conditions() -> None:
                                 ConditionConfiguration(
                                     process=ProcessConditionConfiguration(
                                         name="maintenance.exe",
-                                        running=True,
+                                        exists=True,
+                                        match=MatchConfiguration(
+                                            type=MatchType.EXACT, case_sensitive=True
+                                        ),
                                     )
                                 ),
                             ]
@@ -486,10 +502,8 @@ def test_configuration_builder_builds_nested_conditions() -> None:
 
     builder = ConfigurationBuilder(
         clock_provider=Dummy_ClockProvider(datetime(2026, 8, 22, 12, 0)),
-        process_provider=Dummy_ProcessProvider(given_is_running=True),
-        window_provider=Dummy_WindowProvider(
-            given_window_exists=True, given_is_available=True
-        ),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
         power_provider=Dummy_PowerProvider(),
     )
 

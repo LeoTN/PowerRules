@@ -6,19 +6,20 @@
 [![latest-beta-version](https://img.shields.io/github/v/release/LeoTN/PowerRules?&include_prereleases&filter=*.*.*b*&display_name=release&style=for-the-badge&logo=Textpattern&logoColor=orange&label=LATEST%20BETA&color=orange)](https://github.com/LeoTN/PowerRules/releases)
 [![license](https://img.shields.io/github/license/LeoTN/PowerRules?&style=for-the-badge&logo=Google%20Docs&logoColor=blue&label=License&color=blue)](https://github.com/LeoTN/PowerRules/blob/main/LICENSE)
 
+<details>
+  <summary><b>Table of Contents</b></summary>
+  <a href="#about">About</a><br>
+  <a href="#getting-started">Getting Started</a><br>
+  <a href="#features">Features</a><br>
+  <a href="#supported-platforms">Supported Platforms</a><br>
+  <a href="#credits--license">Credits & License</a>
+</details>
+
 </div>
-
-#
-
-* [About](#about)
-* [Getting Started](#getting-started)
-* [Features](#features)
-* [Supported Platforms](#supported-platforms)
-* [Credits & License](#credits--license)
 
 ## About
 
-PowerRules allows you to define rules that automatically control the power state of your computer based on configurable conditions.
+Define rules to control your computer's power state based on configurable conditions.
 
 Rules are evaluated from top to bottom. The first matching rule executes its configured action.
 
@@ -36,21 +37,22 @@ pip install powerrules
 # yaml-language-server: $schema=https://raw.githubusercontent.com/LeoTN/PowerRules/main/assets/schema/powerrules_policy.schema.json
 
 rules:
-  - name: "Shutdown after nightly weekend backup"
+  # Shut down when no backup process is running, a matching backup window is open, and the current time is between 23:00 and 01:30
+  - name: "Shutdown after nightly backup"
     conditions:
       and:
         - process:
             name: "backup.exe"
-            running: false
+            exists: false
         - window:
-            title: "Backup Completed"
+            title: "Backup Nr. [0-9]+ Completed"
             exists: true
+            match:
+              type: regex
         - datetime:
             between:
               start: "23"
               end: "1:30"
-        - datetime:
-            weekday: ["Saturday", "Sunday"]
     action:
       type: shutdown
 ```
@@ -73,12 +75,6 @@ pwru policy show
 pwru policy run --once
 ```
 
-**Run continuously:**
-
-```bash
-pwru policy run
-```
-
 Use a different policy file with `--policy` or `-p`:
 
 ```bash
@@ -87,16 +83,95 @@ pwru policy run --policy my-policy.yaml
 
 ## Features
 
-| Feature | Description |
-|---------|-------------|
-| **Rule-based power management** | Define ordered rules with conditions and power actions |
-| **Process conditions** | Match rules based on whether a process is running |
-| **Time conditions** | Match time ranges and weekdays |
-| **Window conditions** | Match window titles |
-| **Logical conditions** | Combine conditions using `and`, `or`, and `not` |
-| **Power actions** | Shutdown, sleep, hibernate, and reboot |
-| **Continuous evaluation** | Evaluate policies repeatedly |
-| **First-match execution** | Only the first matching rule executes once per match |
+**Process & Window Matching**  
+Match rules based on processes and window titles.
+
+```yaml
+# Match if process "firefox.exe" is running
+- process:
+    name: "firefox.exe"
+    exists: true
+
+# Match if window with exact title "Firefox" exists
+- window:
+    title: "Firefox"
+    exists: true
+```
+<br>
+
+**Regex Matching**  
+Match process names and window titles using regular expressions with full-string matching.
+
+```yaml
+# Match if process name ends with "firefox"
+- process:
+    name: ".*firefox.exe"
+    match:
+      type: regex
+      # This is the default behavior
+      case_sensitive: true
+
+# Match if window title starts with "firefox" (case insensitive)
+- window:
+    title: "Firefox.*"
+    match:
+      type: regex
+      case_sensitive: false
+```
+<br>
+
+**Time-based Conditions**  
+Match specific time ranges and weekdays.
+
+```yaml
+# Match if the current time is between 23:00 and 1:30
+- datetime:
+    between:
+      start: "23"
+      end: "1:30"
+
+# Match on Monday or Friday
+- datetime:
+    weekdays:
+      - "Monday"
+      - "Friday"
+```
+<br>
+
+**Logical Conditions**  
+Combine multiple conditions using `and`, `or`, and `not`.
+
+```yaml
+# Match if (condition_1 OR condition_2) AND NOT condition_3
+- and:
+    - or:
+        - condition_1: ...
+        - condition_2: ...
+    - not:
+        condition_3: ...
+```
+<br>
+
+**Power Actions**  
+Shutdown, sleep, hibernate, or reboot your computer.
+
+```yaml
+# Shutdown on match
+- action:
+    type: shutdown
+
+# Reboot on match
+- action:
+    type: reboot
+```
+<br>
+
+**Continuous Evaluation**  
+Evaluate rules at a set interval.
+
+```bash
+pwru policy run
+```
 
 ## Supported Platforms
 

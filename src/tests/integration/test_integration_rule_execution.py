@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from powerrules.actions.power import ShutdownAction
 from powerrules.config.builder import ConfigurationBuilder
@@ -9,8 +10,6 @@ from powerrules.engine.rule_engine import RuleEngine
 from tests.dummies import (
     Dummy_ClockProvider,
     Dummy_PowerProvider,
-    Dummy_ProcessProvider,
-    Dummy_WindowProvider,
 )
 
 
@@ -24,7 +23,7 @@ rules:
       and:
         - process:
             name: "backup.exe"
-            running: false
+            exists: false
         - datetime:
             between:
                 start: "23:00"
@@ -36,18 +35,18 @@ rules:
     )
 
     clock_provider = Dummy_ClockProvider(datetime(2026, 8, 22, 1, 30))
-    process_provider = Dummy_ProcessProvider(given_is_running=False)
-    window_provider = Dummy_WindowProvider(
-        given_window_exists=True, given_is_available=True
-    )
+    mock_process_provider = patch(
+        "powerrules.providers.process.ProcessProvider"
+    ).start()
+    mock_window_provider = patch("powerrules.providers.window.WindowProvider").start()
     power_provider = Dummy_PowerProvider()
 
     configuration = ConfigurationLoader().load(configuration_file)
 
     rule_set = ConfigurationBuilder(
         clock_provider=clock_provider,
-        process_provider=process_provider,
-        window_provider=window_provider,
+        process_provider=mock_process_provider,
+        window_provider=mock_window_provider,
         power_provider=power_provider,
     ).build(configuration)
 
@@ -72,7 +71,7 @@ rules:
       and:
         - process:
             name: "backup.exe"
-            running: false
+            exists: false
         - datetime:
             between:
                 start: "23:00"
@@ -84,18 +83,18 @@ rules:
     )
 
     clock_provider = Dummy_ClockProvider(datetime(2026, 8, 22, 22, 30))
-    process_provider = Dummy_ProcessProvider(given_is_running=False)
-    window_provider = Dummy_WindowProvider(
-        given_window_exists=True, given_is_available=True
-    )
+    mock_process_provider = patch(
+        "powerrules.providers.process.ProcessProvider"
+    ).start()
+    mock_window_provider = patch("powerrules.providers.window.WindowProvider").start()
     power_provider = Dummy_PowerProvider()
 
     configuration = ConfigurationLoader().load(configuration_file)
 
     rule_set = ConfigurationBuilder(
         clock_provider=clock_provider,
-        process_provider=process_provider,
-        window_provider=window_provider,
+        process_provider=mock_process_provider,
+        window_provider=mock_window_provider,
         power_provider=power_provider,
     ).build(configuration)
 
@@ -132,18 +131,18 @@ rules:
     )
 
     clock_provider = Dummy_ClockProvider(datetime(2026, 8, 22, 23, 30))
-    process_provider = Dummy_ProcessProvider(given_is_running=True)
-    window_provider = Dummy_WindowProvider(
-        given_window_exists=True, given_is_available=True
-    )
+    mock_process_provider = patch(
+        "powerrules.providers.process.ProcessProvider"
+    ).start()
+    mock_window_provider = patch("powerrules.providers.window.WindowProvider").start()
     power_provider = Dummy_PowerProvider()
 
     configuration = ConfigurationLoader().load(configuration_file)
 
     rule_set = ConfigurationBuilder(
         clock_provider=clock_provider,
-        process_provider=process_provider,
-        window_provider=window_provider,
+        process_provider=mock_process_provider,
+        window_provider=mock_window_provider,
         power_provider=power_provider,
     ).build(configuration)
 

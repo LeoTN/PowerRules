@@ -52,25 +52,6 @@ class Dummy_ClockProvider:
         return self.given_time
 
 
-# Dummy process provider which returns its predetermined result. If an exception is given, it will be raised
-class Dummy_ProcessProvider:
-    def __init__(
-        self, given_is_running: bool, given_exception: Exception | None = None
-    ):
-        self.given_is_running = given_is_running
-        self.given_exception = given_exception
-        self.given_process_name = None
-
-    def is_running(self, process_name: str) -> bool:
-        # Save the process name for evaluation in tests
-        self.given_process_name = process_name
-
-        if self.given_exception is not None:
-            raise self.given_exception
-
-        return self.given_is_running
-
-
 # Keep track of the number of times each action is executed. Raises an exception if the given exception is not None
 class Dummy_PowerProvider:
     def __init__(self, given_exception: Exception | None = None):
@@ -103,32 +84,6 @@ class Dummy_PowerProvider:
 
         if self.given_exception is not None:
             raise self.given_exception
-
-
-# Dummy window provider which returns its predetermined result. If an exception is given, it will be raised
-class Dummy_WindowProvider:
-    def __init__(
-        self,
-        given_window_exists: bool,
-        given_is_available: bool,
-        given_exception: Exception | None = None,
-    ):
-        self.given_window_exists = given_window_exists
-        self.given_is_available = given_is_available
-        self.given_exception = given_exception
-
-    def window_exists(self, window_title: str) -> bool:
-        # Save the window title for evaluation in tests
-        self.given_window_title = window_title
-
-        if self.given_exception is not None:
-            raise self.given_exception
-
-        return self.given_window_exists
-
-    @property
-    def is_available(self) -> bool:
-        return self.given_is_available
 
 
 #####################
