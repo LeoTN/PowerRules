@@ -150,22 +150,22 @@ class ConfigurationBuilder:
         Returns:
             The executable datetime condition.
         """
+        time_range = None
         if configuration.between is not None:
-            return DateTimeCondition(
-                clock_provider=self.clock_provider,
-                time_range=TimeRange(
-                    start=configuration.between.start,
-                    end=configuration.between.end,
-                ),
+            time_range = TimeRange(
+                start=configuration.between.start,
+                end=configuration.between.end,
             )
 
+        weekdays = None
         if configuration.weekday is not None:
-            return DateTimeCondition(
-                clock_provider=self.clock_provider,
-                weekdays=frozenset(configuration.weekday),
-            )
+            weekdays = frozenset(configuration.weekday)
 
-        raise RuntimeError("Invalid datetime condition configuration")
+        return DateTimeCondition(
+            clock_provider=self.clock_provider,
+            time_range=time_range,
+            weekdays=weekdays,
+        )
 
     def _build_window_condition(
         self, configuration: WindowConditionConfiguration

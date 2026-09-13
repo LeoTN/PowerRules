@@ -63,31 +63,6 @@ class DateTimeConditionConfiguration(BaseModel):
     between: TimeRangeConfiguration | None = None
     weekday: list[Weekday] | None = None
 
-    @model_validator(mode="after")
-    def validate_variant(self) -> "DateTimeConditionConfiguration":
-        """Validate that exactly one datetime variant is configured.
-
-        Returns:
-            The validated configuration.
-
-        Raises:
-            ValueError: If zero or multiple variants are configured.
-        """
-        configured_variants = sum(
-            value is not None
-            for value in (
-                self.between,
-                self.weekday,
-            )
-        )
-
-        if configured_variants != 1:
-            raise ValueError(
-                "A datetime condition must define exactly one of 'between' or 'weekday'"
-            )
-
-        return self
-
 
 class WindowConditionConfiguration(BaseModel):
     """Configuration for a window condition."""

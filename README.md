@@ -132,7 +132,7 @@ Match specific time ranges and weekdays.
 
 # Match on Monday or Friday
 - datetime:
-    weekdays:
+    weekday:
       - "Monday"
       - "Friday"
 ```

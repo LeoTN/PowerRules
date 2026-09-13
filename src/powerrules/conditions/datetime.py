@@ -59,17 +59,24 @@ class DateTimeCondition:
         self.time_range = time_range
         self.weekdays = weekdays
 
+        # This is usually verified with Pydantic
+        if self.time_range is None and self.weekdays is None:
+            raise ValueError(
+                "DateTimeCondition requires at least one criterion of time_range or weekdays to be specified"
+            )
+
     def evaluate(self) -> bool:
-        """Evaluate the configured date and time condition.
+        """Evaluate the configured date, time and weekday criteria.
 
         Returns:
-            True if the current date and time matches the condition,
-            otherwise False.
+            True if the current date, time and weekday match the current date, otherwise False.
         """
         current_datetime = self.clock_provider.now()
 
+        # Check each configured criterion, return False if any are not satisfied
         if self.time_range is not None:
-            return self.time_range.contains(current_datetime.time())
+            if not self.time_range.contains(current_datetime.time()):
+                return False
 
         if self.weekdays is not None:
             current_weekday = (
@@ -81,6 +88,9 @@ class DateTimeCondition:
                 Weekday.SATURDAY,
                 Weekday.SUNDAY,
             )[current_datetime.weekday()]
-            return current_weekday in self.weekdays
 
-        return False
+            if current_weekday not in self.weekdays:
+                return False
+
+        # All configured criteria are satisfied
+        return True
