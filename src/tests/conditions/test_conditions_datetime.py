@@ -245,10 +245,8 @@ def test_datetime_condition_does_not_match_when_weekday_matches_but_time_does_no
     assert condition.evaluate() is False
 
 
-# Special case: The time range crosses midnight, and the current time is before midnight on a matching weekday, but after midnight on a non-matching weekday
-def test_datetime_condition_matches_before_midnight_but_not_after_midnight_because_of_weekday() -> (
-    None
-):
+# Special case: The time range crosses midnight, so the weekday refers to the day on which the range starts
+def test_datetime_condition_uses_start_weekday_for_range_crossing_midnight() -> None:
     clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 23, 30))
 
     condition = DateTimeCondition(
@@ -260,11 +258,15 @@ def test_datetime_condition_matches_before_midnight_but_not_after_midnight_becau
         weekdays=frozenset({Weekday.FRIDAY}),
     )
 
+    # Friday 23:30 is at the start of the range
     assert condition.evaluate() is True
 
-    # Change the current time to after midnight on Saturday
+    # Saturday 01:00 belongs to the range which started on Friday
     clock_provider.now = lambda: datetime(2026, 8, 22, 1, 0)
+    assert condition.evaluate() is True
 
+    # Friday 01:00 belongs to the range which started on Thursday
+    clock_provider.now = lambda: datetime(2026, 8, 21, 1, 0)
     assert condition.evaluate() is False
 
 
@@ -273,3 +275,87 @@ def test_datetime_condition_raises_error_when_no_criteria_specified() -> None:
 
     with pytest.raises(ValueError):
         DateTimeCondition(clock_provider=clock_provider)
+
+
+@pytest.mark.parametrize(
+    ("current_datetime", "expected"),
+    [
+        # Before the start of the range on the configured weekday
+        (datetime(2026, 8, 21, 21, 59, 59), False),
+        # The start of the range is inclusive
+        (datetime(2026, 8, 21, 22, 0), True),
+        (datetime(2026, 8, 21, 23, 59, 59), True),
+        # After midnight, the range still belongs to the day on which it started
+        (datetime(2026, 8, 22, 0, 0), True),
+        (datetime(2026, 8, 22, 5, 59, 59), True),
+        # The end of the range is exclusive
+        (datetime(2026, 8, 22, 6, 0), False),
+        # Saturday evening starts a new range for Saturday, not for Friday
+        (datetime(2026, 8, 22, 22, 0), False),
+        # Early Friday belongs to the range which started on Thursday
+        (datetime(2026, 8, 21, 0, 0), False),
+        (datetime(2026, 8, 21, 5, 59, 59), False),
+    ],
+)
+def test_datetime_condition_uses_start_weekday_at_range_boundaries(
+    current_datetime: datetime,
+    expected: bool,
+) -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(current_datetime),
+        time_range=TimeRange(
+            start=time(22, 0),
+            end=time(6, 0),
+        ),
+        weekdays=frozenset({Weekday.FRIDAY}),
+    )
+
+    assert condition.evaluate() is expected
+
+
+# A range ending exactly at midnight does not reach into the next day
+@pytest.mark.parametrize(
+    ("current_datetime", "expected"),
+    [
+        (datetime(2026, 8, 21, 23, 59, 59), True),
+        (datetime(2026, 8, 22, 0, 0), False),
+    ],
+)
+def test_datetime_condition_range_ending_at_midnight_stays_within_start_day(
+    current_datetime: datetime,
+    expected: bool,
+) -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(current_datetime),
+        time_range=TimeRange(
+            start=time(22, 0),
+            end=time(0, 0),
+        ),
+        weekdays=frozenset({Weekday.FRIDAY}),
+    )
+
+    assert condition.evaluate() is expected
+
+
+# A range within one day must not shift the weekday
+@pytest.mark.parametrize(
+    ("weekday", "expected"),
+    [
+        (Weekday.FRIDAY, True),
+        (Weekday.THURSDAY, False),
+    ],
+)
+def test_datetime_condition_does_not_shift_weekday_for_range_within_one_day(
+    weekday: Weekday,
+    expected: bool,
+) -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        time_range=TimeRange(
+            start=time(10, 0),
+            end=time(18, 0),
+        ),
+        weekdays=frozenset({weekday}),
+    )
+
+    assert condition.evaluate() is expected

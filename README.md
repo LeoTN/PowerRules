@@ -121,7 +121,7 @@ Match process names and window titles using regular expressions with full-string
 <br>
 
 **Time-based Conditions**  
-Match specific time ranges and weekdays.
+Match specific time ranges and weekdays. If both are configured, both must match.
 
 ```yaml
 # Match if the current time is between 23:00 and 1:30
@@ -135,6 +135,14 @@ Match specific time ranges and weekdays.
     weekday:
       - "Monday"
       - "Friday"
+
+# Match from Monday 23:00 until Tuesday 1:30 (the weekday refers to the day on which the time range starts)
+- datetime:
+    between:
+      start: "23"
+      end: "1:30"
+    weekday:
+      - "Monday"
 ```
 <br>
 

@@ -3,6 +3,7 @@ from datetime import time
 import pytest
 from pydantic import ValidationError
 
+from powerrules.conditions.datetime import Weekday
 from powerrules.config.models import (
     DateTimeConditionConfiguration,
     RuleSetConfiguration,
@@ -242,3 +243,72 @@ def test_datetime_configuration_rejects_too_many_time_components() -> None:
                 }
             }
         )
+
+
+###########################
+# Datetime criteria tests
+###########################
+
+
+def test_datetime_configuration_accepts_between_and_weekday() -> None:
+    configuration = DateTimeConditionConfiguration.model_validate(
+        {
+            "between": {
+                "start": "23",
+                "end": "1:30",
+            },
+            "weekday": ["Monday"],
+        }
+    )
+
+    assert configuration.between is not None
+    assert configuration.between.start == time(23, 0)
+    assert configuration.between.end == time(1, 30)
+    assert configuration.weekday == [Weekday.MONDAY]
+
+
+def test_datetime_configuration_accepts_weekday_only() -> None:
+    configuration = DateTimeConditionConfiguration.model_validate(
+        {"weekday": ["Saturday", "Sunday"]}
+    )
+
+    assert configuration.between is None
+    assert configuration.weekday == [Weekday.SATURDAY, Weekday.SUNDAY]
+
+
+def test_datetime_configuration_rejects_empty_configuration() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="at least one criterion of 'between' or 'weekday'",
+    ):
+        DateTimeConditionConfiguration.model_validate({})
+
+
+def test_datetime_configuration_rejects_empty_weekday_list() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="'weekday' list must contain at least one weekday",
+    ):
+        DateTimeConditionConfiguration.model_validate({"weekday": []})
+
+
+# A valid 'between' must not make up for an empty weekday list
+def test_datetime_configuration_rejects_empty_weekday_list_with_between() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="'weekday' list must contain at least one weekday",
+    ):
+        DateTimeConditionConfiguration.model_validate(
+            {
+                "between": {
+                    "start": "22:00",
+                    "end": "6:00",
+                },
+                "weekday": [],
+            }
+        )
+
+
+def test_datetime_configuration_rejects_unknown_weekday() -> None:
+    with pytest.raises(ValidationError):
+        DateTimeConditionConfiguration.model_validate({"weekday": ["Funday"]})

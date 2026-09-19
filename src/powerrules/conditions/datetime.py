@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import time
+from datetime import time, timedelta
 from enum import StrEnum
 
 from powerrules.providers.clock import ClockProvider
@@ -68,15 +68,30 @@ class DateTimeCondition:
     def evaluate(self) -> bool:
         """Evaluate the configured date, time and weekday criteria.
 
+        If the time range crosses midnight, the weekday refers to the day on
+        which the range starts. For example, with the range 23:00-1:30 and the
+        weekday Monday, the condition matches from Monday 23:00 until Tuesday 1:30.
+
         Returns:
-            True if the current date, time and weekday match the current date, otherwise False.
+            True if the current date, time and weekday match the condition, otherwise False.
         """
         current_datetime = self.clock_provider.now()
+        reference_datetime = current_datetime
 
         # Check each configured criterion, return False if any are not satisfied
         if self.time_range is not None:
             if not self.time_range.contains(current_datetime.time()):
                 return False
+
+            # When crossing midnight, the weekday refers to the day on which the range starts
+            # For example, with the range 23:00-1:30 and the weekday Monday, the condition matches from Monday 23:00 until midnight (0:00) as usual.
+            # When crossing midnight, the weekday is technically Tueday, but will be treated as Monday to match until 1:30 on Tuesday
+            if (
+                # The time range crosses midnight and the current time is before the end of the range
+                self.time_range.start > self.time_range.end
+                and current_datetime.time() < self.time_range.end
+            ):
+                reference_datetime = current_datetime - timedelta(days=1)
 
         if self.weekdays is not None:
             current_weekday = (
@@ -87,7 +102,7 @@ class DateTimeCondition:
                 Weekday.FRIDAY,
                 Weekday.SATURDAY,
                 Weekday.SUNDAY,
-            )[current_datetime.weekday()]
+            )[reference_datetime.weekday()]
 
             if current_weekday not in self.weekdays:
                 return False

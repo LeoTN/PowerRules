@@ -222,6 +222,47 @@ def test_configuration_builder_builds_datetime_weekday_condition() -> None:
     )
 
 
+def test_configuration_builder_builds_datetime_between_and_weekday_condition() -> None:
+    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 22, 12, 0))
+
+    configuration = RuleSetConfiguration(
+        rules=[
+            RuleConfiguration(
+                name="Datetime rule",
+                conditions=ConditionConfiguration(
+                    datetime=DateTimeConditionConfiguration(
+                        between=TimeRangeConfiguration(
+                            start=time(23, 0),
+                            end=time(1, 30),
+                        ),
+                        weekday=[Weekday.MONDAY],
+                    )
+                ),
+                action=ActionConfiguration(
+                    type="shutdown",
+                ),
+            )
+        ]
+    )
+
+    builder = ConfigurationBuilder(
+        clock_provider=clock_provider,
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
+        power_provider=Dummy_PowerProvider(),
+    )
+
+    rule = builder.build(configuration).rules[0]
+
+    assert isinstance(rule.condition, DateTimeCondition)
+    assert rule.condition.clock_provider is clock_provider
+    assert rule.condition.time_range == TimeRange(
+        start=time(23, 0),
+        end=time(1, 30),
+    )
+    assert rule.condition.weekdays == frozenset({Weekday.MONDAY})
+
+
 def test_configuration_builder_builds_window_condition() -> None:
     configuration = RuleSetConfiguration(
         rules=[

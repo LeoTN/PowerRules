@@ -63,6 +63,27 @@ class DateTimeConditionConfiguration(BaseModel):
     between: TimeRangeConfiguration | None = None
     weekday: list[Weekday] | None = None
 
+    @model_validator(mode="after")
+    def validate_criteria(self) -> "DateTimeConditionConfiguration":
+        """Validate that at least one datetime criterion is configured."""
+        if self.between is None and self.weekday is None:
+            raise ValueError(
+                "A datetime condition must define at least one criterion of 'between' or 'weekday'"
+            )
+
+        return self
+
+    @field_validator("weekday")
+    @classmethod
+    def validate_weekday_not_empty(
+        cls, value: list[Weekday] | None
+    ) -> list[Weekday] | None:
+        """Validate that the configured weekday list is not empty."""
+        if value is not None and len(value) == 0:
+            raise ValueError("The 'weekday' list must contain at least one weekday")
+
+        return value
+
 
 class WindowConditionConfiguration(BaseModel):
     """Configuration for a window condition."""
