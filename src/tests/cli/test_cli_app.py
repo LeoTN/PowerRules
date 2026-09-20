@@ -22,9 +22,9 @@ def test_cli_version() -> None:
     result = runner.invoke(app, ["--version"])
 
     assert result.exit_code == 0
-    # Check if the version matches a valid format
+    # The version is derived from the Git tags, so it can also be a development version (e.g. 0.2.0.post3.dev0+28c1684)
     assert re.fullmatch(
-        r"PowerRules \d+\.\d+\.\d+(?:b\d+)?",
+        r"PowerRules \d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?(?:\+[0-9a-zA-Z.]+)?",
         result.stdout.strip(),
     )
 
