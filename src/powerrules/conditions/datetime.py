@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import time, timedelta
+from datetime import datetime, time, timedelta
 from enum import StrEnum
 
 from powerrules.providers.clock import ClockProvider
@@ -47,23 +47,52 @@ class TimeRange:
         return current_time >= self.start or current_time < self.end
 
 
+@dataclass(frozen=True)
+class DateTimeRange:
+    """Represents an absolute range between two points in time without timezone."""
+
+    start: datetime
+    end: datetime
+
+    def contains(self, current_datetime: datetime) -> bool:
+        """Return whether the given datetime is within the range.
+
+        The start is inclusive and the end is exclusive.
+
+        Args:
+            current_datetime: Datetime to check.
+
+        Returns:
+            True if the datetime is within the range, otherwise False.
+        """
+        return self.start <= current_datetime < self.end
+
+
 class DateTimeCondition:
     def __init__(
         self,
         clock_provider: ClockProvider,
         *,
         time_range: TimeRange | None = None,
+        datetime_range: DateTimeRange | None = None,
         weekdays: frozenset[Weekday] | None = None,
     ):
+        # This is usually verified by Pydantic
+        if time_range is None and datetime_range is None and weekdays is None:
+            raise ValueError(
+                "A datetime condition requires at least one criterion of 'time_range', 'datetime_range' or 'weekdays'"
+            )
+
+        # This shouldn't happen because Pydantic only allows one of them. Combining both of them is technically possible, but could lead to unexpected behavior
+        if time_range is not None and datetime_range is not None:
+            raise ValueError(
+                "A datetime condition cannot define both 'time_range' and 'datetime_range'"
+            )
+
         self.clock_provider = clock_provider
         self.time_range = time_range
+        self.datetime_range = datetime_range
         self.weekdays = weekdays
-
-        # This is usually verified with Pydantic
-        if self.time_range is None and self.weekdays is None:
-            raise ValueError(
-                "DateTimeCondition requires at least one criterion of time_range or weekdays to be specified"
-            )
 
     def evaluate(self) -> bool:
         """Evaluate the configured date, time and weekday criteria.
@@ -72,9 +101,12 @@ class DateTimeCondition:
         which the range starts. For example, with the range 23:00-1:30 and the
         weekday Monday, the condition matches from Monday 23:00 until Tuesday 1:30.
 
+        For an absolute datetime range, the weekday refers to the current day.
+
         Returns:
             True if the current date, time and weekday match the condition, otherwise False.
         """
+
         current_datetime = self.clock_provider.now()
         reference_datetime = current_datetime
 
@@ -92,6 +124,11 @@ class DateTimeCondition:
                 and current_datetime.time() < self.time_range.end
             ):
                 reference_datetime = current_datetime - timedelta(days=1)
+
+        if self.datetime_range is not None and not self.datetime_range.contains(
+            current_datetime
+        ):
+            return False
 
         if self.weekdays is not None:
             current_weekday = (

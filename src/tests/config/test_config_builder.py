@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import date, datetime, time
 from unittest.mock import patch
 
 from powerrules.actions.power import (
@@ -7,7 +7,12 @@ from powerrules.actions.power import (
     ShutdownAction,
     SleepAction,
 )
-from powerrules.conditions.datetime import DateTimeCondition, TimeRange, Weekday
+from powerrules.conditions.datetime import (
+    DateTimeCondition,
+    DateTimeRange,
+    TimeRange,
+    Weekday,
+)
 from powerrules.conditions.matcher import MatchType
 from powerrules.conditions.operators import AndCondition, OrCondition
 from powerrules.conditions.process import ProcessCondition
@@ -16,7 +21,9 @@ from powerrules.config.builder import ConfigurationBuilder
 from powerrules.config.models import (
     ActionConfiguration,
     ConditionConfiguration,
+    DateRangeConfiguration,
     DateTimeConditionConfiguration,
+    DateTimeRangeConfiguration,
     MatchConfiguration,
     ProcessConditionConfiguration,
     RuleConfiguration,
@@ -261,6 +268,179 @@ def test_configuration_builder_builds_datetime_between_and_weekday_condition() -
         end=time(1, 30),
     )
     assert rule.condition.weekdays == frozenset({Weekday.MONDAY})
+
+
+def test_configuration_builder_builds_date_range_condition() -> None:
+    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0))
+
+    configuration = RuleSetConfiguration(
+        rules=[
+            RuleConfiguration(
+                name="Date range rule",
+                conditions=ConditionConfiguration(
+                    datetime=DateTimeConditionConfiguration(
+                        between=DateRangeConfiguration(
+                            start=date(2026, 8, 21),
+                            end=date(2026, 8, 22),
+                        ),
+                    )
+                ),
+                action=ActionConfiguration(
+                    type="shutdown",
+                ),
+            )
+        ]
+    )
+
+    builder = ConfigurationBuilder(
+        clock_provider=clock_provider,
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
+        power_provider=Dummy_PowerProvider(),
+    )
+
+    rule = builder.build(configuration).rules[0]
+
+    assert isinstance(rule.condition, DateTimeCondition)
+    assert rule.condition.clock_provider is clock_provider
+    # The date range starts at midnight of the start date and ends (exclusive) at midnight of the end date
+    assert rule.condition.datetime_range == DateTimeRange(
+        start=datetime(2026, 8, 21, 0, 0),
+        end=datetime(2026, 8, 22, 0, 0),
+    )
+    assert rule.condition.time_range is None
+    assert rule.condition.weekdays is None
+
+    # The built condition matches the whole start date, but not the end date
+    assert rule.condition.evaluate() is True
+
+    clock_provider.given_time = datetime(2026, 8, 22, 0, 0)
+
+    assert rule.condition.evaluate() is False
+
+
+def test_configuration_builder_builds_datetime_range_condition() -> None:
+    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 23, 0))
+
+    configuration = RuleSetConfiguration(
+        rules=[
+            RuleConfiguration(
+                name="Datetime range rule",
+                conditions=ConditionConfiguration(
+                    datetime=DateTimeConditionConfiguration(
+                        between=DateTimeRangeConfiguration(
+                            start=datetime(2026, 8, 21, 18, 0),
+                            end=datetime(2026, 8, 22, 6, 0),
+                        ),
+                    )
+                ),
+                action=ActionConfiguration(
+                    type="shutdown",
+                ),
+            )
+        ]
+    )
+
+    builder = ConfigurationBuilder(
+        clock_provider=clock_provider,
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
+        power_provider=Dummy_PowerProvider(),
+    )
+
+    rule = builder.build(configuration).rules[0]
+
+    assert isinstance(rule.condition, DateTimeCondition)
+    assert rule.condition.clock_provider is clock_provider
+    assert rule.condition.datetime_range == DateTimeRange(
+        start=datetime(2026, 8, 21, 18, 0),
+        end=datetime(2026, 8, 22, 6, 0),
+    )
+    assert rule.condition.time_range is None
+    assert rule.condition.weekdays is None
+    assert rule.condition.evaluate() is True
+
+
+def test_configuration_builder_builds_date_range_with_weekday_condition() -> None:
+    configuration = RuleSetConfiguration(
+        rules=[
+            RuleConfiguration(
+                name="Date range with weekday rule",
+                conditions=ConditionConfiguration(
+                    datetime=DateTimeConditionConfiguration(
+                        between=DateRangeConfiguration(
+                            start=date(2026, 8, 21),
+                            end=date(2026, 8, 22),
+                        ),
+                        weekday=[Weekday.FRIDAY],
+                    )
+                ),
+                action=ActionConfiguration(
+                    type="shutdown",
+                ),
+            )
+        ]
+    )
+
+    builder = ConfigurationBuilder(
+        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
+        power_provider=Dummy_PowerProvider(),
+    )
+
+    rule = builder.build(configuration).rules[0]
+
+    assert isinstance(rule.condition, DateTimeCondition)
+    assert rule.condition.datetime_range == DateTimeRange(
+        start=datetime(2026, 8, 21, 0, 0),
+        end=datetime(2026, 8, 22, 0, 0),
+    )
+    assert rule.condition.weekdays == frozenset({Weekday.FRIDAY})
+    assert rule.condition.time_range is None
+
+
+def test_configuration_builder_builds_time_range_without_datetime_range() -> None:
+    configuration = RuleSetConfiguration(
+        rules=[
+            RuleConfiguration(
+                name="Time range rule",
+                conditions=ConditionConfiguration(
+                    datetime=DateTimeConditionConfiguration(
+                        between=TimeRangeConfiguration(
+                            start=time(22, 0),
+                            end=time(6, 0),
+                        ),
+                    )
+                ),
+                action=ActionConfiguration(
+                    type="shutdown",
+                ),
+            )
+        ]
+    )
+
+    builder = ConfigurationBuilder(
+        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
+        power_provider=Dummy_PowerProvider(),
+    )
+
+    rule = builder.build(configuration).rules[0]
+
+    assert isinstance(rule.condition, DateTimeCondition)
+    assert rule.condition.time_range == TimeRange(
+        start=time(22, 0),
+        end=time(6, 0),
+    )
+    assert rule.condition.datetime_range is None
+    assert rule.condition.weekdays is None
+
+
+#######################
+# WindowCondition tests
+#######################
 
 
 def test_configuration_builder_builds_window_condition() -> None:

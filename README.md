@@ -121,7 +121,7 @@ Match process names and window titles using regular expressions with full-string
 <br>
 
 **Time-based Conditions**  
-Match specific time ranges and weekdays. If both are configured, both must match.
+Match specific dates, time ranges and weekdays. If both `between` and `weekday` are configured, both must match. The end of a range is always exclusive.
 
 ```yaml
 # Match if the current time is between 23:00 and 1:30
@@ -143,8 +143,33 @@ Match specific time ranges and weekdays. If both are configured, both must match
       end: "1:30"
     weekday:
       - "Monday"
+
+# Match on the whole days 2026-08-21 and 2026-08-22 (the end date is not included)
+- datetime:
+    between:
+      start: "2026-08-21"
+      end: "2026-08-23"
+
+# Match from 2026-08-21 18:00 until 2026-08-23 6:00
+- datetime:
+    between:
+      start: "2026-08-21 18:00"
+      end: "2026-08-23 6:00"
+
+   # Match on Saturdays and Sundays from 2026-08-21 until the end of 2026 (the weekday refers to the current day)
+- datetime:
+    between:
+      start: "2026-08-21"
+      end: "2027-01-01"
+    weekday:
+      - "Saturday"
+      - "Sunday"
 ```
 <br>
+
+`start` and `end` must be of the same kind: both dates (`"2026-08-21"`), both times (`"23"`, `"1:30"`) or both dates with a time (`"2026-08-21 18:00"`, a `T` instead of the space is also allowed).
+
+Times without a date repeat every day and may cross midnight. All values use the local time of the computer, timezones are currently not supported.
 
 **Logical Conditions**  
 Combine multiple conditions using `and`, `or`, and `not`.

@@ -2,7 +2,12 @@ from datetime import datetime, time
 
 import pytest
 
-from powerrules.conditions.datetime import DateTimeCondition, TimeRange, Weekday
+from powerrules.conditions.datetime import (
+    DateTimeCondition,
+    DateTimeRange,
+    TimeRange,
+    Weekday,
+)
 from tests.dummies import Dummy_ClockProvider
 
 #################
@@ -100,6 +105,144 @@ def test_time_range_with_equal_start_and_end_matches_no_time() -> None:
 
     assert time_range.contains(time(10, 0)) is False
     assert time_range.contains(time(12, 0)) is False
+
+
+#####################
+# DateTimeRange tests
+#####################
+
+
+@pytest.mark.parametrize(
+    ("current_datetime", "expected"),
+    [
+        # Before the start of the range
+        (datetime(2026, 8, 21, 17, 59, 59), False),
+        # The start of the range is inclusive
+        (datetime(2026, 8, 21, 18, 0), True),
+        # The range crosses midnight between the two dates
+        (datetime(2026, 8, 21, 23, 59, 59), True),
+        (datetime(2026, 8, 22, 0, 0), True),
+        (datetime(2026, 8, 22, 5, 59, 59), True),
+        # The end of the range is exclusive
+        (datetime(2026, 8, 22, 6, 0), False),
+        # The date is taken into account, not only the time of day
+        (datetime(2026, 8, 20, 22, 0), False),
+        (datetime(2026, 8, 23, 1, 0), False),
+    ],
+)
+def test_datetime_range_contains_datetime_at_boundaries(
+    current_datetime: datetime,
+    expected: bool,
+) -> None:
+    datetime_range = DateTimeRange(
+        start=datetime(2026, 8, 21, 18, 0),
+        end=datetime(2026, 8, 22, 6, 0),
+    )
+
+    assert datetime_range.contains(current_datetime) is expected
+
+
+# A range from midnight to midnight is the result of a configured date range
+@pytest.mark.parametrize(
+    ("current_datetime", "expected"),
+    [
+        (datetime(2026, 8, 20, 23, 59, 59), False),
+        (datetime(2026, 8, 21, 0, 0), True),
+        (datetime(2026, 8, 21, 23, 59, 59), True),
+        (datetime(2026, 8, 22, 0, 0), False),
+    ],
+)
+def test_datetime_range_from_midnight_to_midnight_covers_exactly_one_day(
+    current_datetime: datetime,
+    expected: bool,
+) -> None:
+    datetime_range = DateTimeRange(
+        start=datetime(2026, 8, 21, 0, 0),
+        end=datetime(2026, 8, 22, 0, 0),
+    )
+
+    assert datetime_range.contains(current_datetime) is expected
+
+
+#############################################
+# DateTimeCondition tests (absolute datetimes)
+#############################################
+
+
+def test_datetime_condition_matches_current_datetime_in_datetime_range() -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 23, 30)),
+        datetime_range=DateTimeRange(
+            start=datetime(2026, 8, 21, 18, 0),
+            end=datetime(2026, 8, 22, 6, 0),
+        ),
+    )
+
+    assert condition.evaluate() is True
+
+
+def test_datetime_condition_does_not_match_current_datetime_outside_datetime_range() -> (
+    None
+):
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        datetime_range=DateTimeRange(
+            start=datetime(2026, 8, 21, 18, 0),
+            end=datetime(2026, 8, 22, 6, 0),
+        ),
+    )
+
+    assert condition.evaluate() is False
+
+
+# For an absolute range the weekday refers to the current day, unlike for a time range crossing midnight
+@pytest.mark.parametrize(
+    ("current_datetime", "weekday", "expected"),
+    [
+        (datetime(2026, 8, 21, 22, 0), Weekday.FRIDAY, True),
+        (datetime(2026, 8, 21, 22, 0), Weekday.SATURDAY, False),
+        (datetime(2026, 8, 22, 1, 0), Weekday.SATURDAY, True),
+        (datetime(2026, 8, 22, 1, 0), Weekday.FRIDAY, False),
+    ],
+)
+def test_datetime_condition_uses_current_weekday_for_datetime_range(
+    current_datetime: datetime,
+    weekday: Weekday,
+    expected: bool,
+) -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(current_datetime),
+        datetime_range=DateTimeRange(
+            start=datetime(2026, 8, 21, 18, 0),
+            end=datetime(2026, 8, 22, 6, 0),
+        ),
+        weekdays=frozenset({weekday}),
+    )
+
+    assert condition.evaluate() is expected
+
+
+def test_datetime_condition_does_not_match_configured_weekday_outside_datetime_range() -> (
+    None
+):
+    # 2026-08-28 is a Friday as well, but it is not within the range
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 28, 22, 0)),
+        datetime_range=DateTimeRange(
+            start=datetime(2026, 8, 21, 18, 0),
+            end=datetime(2026, 8, 22, 6, 0),
+        ),
+        weekdays=frozenset({Weekday.FRIDAY}),
+    )
+
+    assert condition.evaluate() is False
+
+
+def test_datetime_condition_requires_at_least_one_criterion() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        DateTimeCondition(
+            clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        )
 
 
 #########################
