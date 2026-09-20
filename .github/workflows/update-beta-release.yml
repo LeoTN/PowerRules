@@ -14,14 +14,10 @@ on:
     push:
         branches:
             - development
-        paths-ignore:
-            - ".github/ISSUE_TEMPLATE/**"
-            - ".github/workflows/**"
-            - "assets/**"
-            - ".gitattributes"
-            - ".gitignore"
-            - "LICENSE"
-            - "README.md"
+        paths:
+            # Only changes which end up in the published package should create a new beta release
+            - "src/powerrules/**"
+            - "pyproject.toml"
 
 permissions:
     contents: read
