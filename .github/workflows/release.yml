@@ -149,9 +149,14 @@ jobs:
               sys.exit(1)
           EOF
 
+  tests:
+    name: Run tests
+    needs: check_pypi
+    uses: ./.github/workflows/tests.yml
+
   build_and_publish:
     name: Build and publish package to PyPI
-    needs: [gather_details, check_pypi]
+    needs: [gather_details, check_pypi, tests]
     runs-on: ubuntu-latest
     env:
       # The version is not stored in the repository, it is set explicitly for this run
