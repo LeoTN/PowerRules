@@ -106,7 +106,7 @@ def cli_command(
             return function(*args, **kwargs)
         except typer.Exit:
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 (blind catch is intentional)
             # Handle errors which result from CLI commands. This avoids tracebacks and instead shows a readable error message
             handle_cli_error(e)
 

@@ -1,9 +1,15 @@
+import platform
 from subprocess import CalledProcessError
 from unittest.mock import Mock, patch
 
 import pytest
 
 from powerrules.platform.windows.power import WindowsPowerProvider
+
+windows_only = pytest.mark.skipif(
+    platform.system() != "Windows",
+    reason="Requires the Windows API (ctypes.windll)",
+)
 
 
 def test_windows_power_provider_shutdown() -> None:
@@ -30,6 +36,7 @@ def test_windows_power_provider_reboot() -> None:
         )
 
 
+@windows_only
 def test_windows_power_provider_sleep() -> None:
     mock_suspend_state = Mock(return_value=1)
 
@@ -48,6 +55,7 @@ def test_windows_power_provider_sleep() -> None:
         )
 
 
+@windows_only
 def test_windows_power_provider_hibernate() -> None:
     mock_suspend_state = Mock(return_value=1)
 
@@ -66,6 +74,7 @@ def test_windows_power_provider_hibernate() -> None:
         )
 
 
+@windows_only
 def test_windows_power_provider_raises_when_suspend_state_fails() -> None:
     mock_suspend_state = Mock(return_value=0)
 

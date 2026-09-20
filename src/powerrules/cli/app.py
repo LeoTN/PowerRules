@@ -1,11 +1,24 @@
 from importlib.metadata import version
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
 from powerrules.application.runtime import PowerRulesRuntime
 from powerrules.cli.errors import cli_command
 from powerrules.config.loader import ConfigurationLoader
+
+DEFAULT_POLICY_PATH = Path("powerrules.yaml")
+
+# The policy option is shared by all commands which work with a policy file
+PolicyOption = Annotated[
+    Path,
+    typer.Option(
+        "--policy",
+        "-p",
+        help="Path to the PowerRules policy file.",
+    ),
+]
 
 # Main application
 app = typer.Typer(
@@ -47,12 +60,7 @@ def main(
 @policy_app.command("validate")
 @cli_command
 def validate(
-    policy: Path = typer.Option(
-        Path("powerrules.yaml"),
-        "--policy",
-        "-p",
-        help="Path to the PowerRules policy file.",
-    ),
+    policy: PolicyOption = DEFAULT_POLICY_PATH,
 ) -> None:
     """Validate a PowerRules policy file."""
     ConfigurationLoader().load(policy)
@@ -63,12 +71,7 @@ def validate(
 @policy_app.command("show")
 @cli_command
 def show(
-    policy: Path = typer.Option(
-        Path("powerrules.yaml"),
-        "--policy",
-        "-p",
-        help="Path to the PowerRules policy file.",
-    ),
+    policy: PolicyOption = DEFAULT_POLICY_PATH,
 ) -> None:
     """Display the configured rules of a PowerRules policy."""
     policy_configuration = ConfigurationLoader().load(policy)
@@ -91,12 +94,7 @@ def run(
         "--stop-on-match",
         help="Stop the continuous evaluation after the first rule match.",
     ),
-    policy: Path = typer.Option(
-        Path("powerrules.yaml"),
-        "--policy",
-        "-p",
-        help="Path to the PowerRules policy file.",
-    ),
+    policy: PolicyOption = DEFAULT_POLICY_PATH,
 ) -> None:
     """Evaluate a PowerRules policy continuously or once."""
     runtime = PowerRulesRuntime()
