@@ -5,6 +5,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from powerrules.conditions.datetime import Month, Weekday
 from powerrules.config.loader import ConfigurationLoader
 from powerrules.config.models import DateRangeConfiguration, DateTimeRangeConfiguration
 
@@ -180,3 +181,34 @@ rules:
         match="Timezone-aware datetimes are not supported",
     ):
         ConfigurationLoader().load(configuration_file)
+
+
+def test_configuration_loader_loads_weekday_and_month_regardless_of_case(
+    tmp_path: Path,
+) -> None:
+    configuration_file = tmp_path / "powerrules.yaml"
+    configuration_file.write_text(
+        """
+rules:
+  - name: "Case test rule"
+    conditions:
+      datetime:
+        weekday:
+          - "saturday"
+          - "SUNDAY"
+        month:
+          - "december"
+          - "January"
+    action:
+      type: shutdown
+""",
+        encoding="utf-8",
+    )
+
+    configuration = ConfigurationLoader().load(configuration_file)
+
+    condition = configuration.rules[0].conditions.datetime
+
+    assert condition is not None
+    assert condition.weekday == [Weekday.SATURDAY, Weekday.SUNDAY]
+    assert condition.month == [Month.DECEMBER, Month.JANUARY]

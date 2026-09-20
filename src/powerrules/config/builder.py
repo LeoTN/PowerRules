@@ -160,7 +160,6 @@ class ConfigurationBuilder:
         Returns:
             The executable datetime condition.
         """
-
         time_range: TimeRange | None = None
         datetime_range: DateTimeRange | None = None
 
@@ -182,12 +181,16 @@ class ConfigurationBuilder:
             if configuration.weekday is not None
             else None
         )
+        months = (
+            frozenset(configuration.month) if configuration.month is not None else None
+        )
 
         return DateTimeCondition(
             clock_provider=self.clock_provider,
             time_range=time_range,
             datetime_range=datetime_range,
             weekdays=weekdays,
+            months=months,
         )
 
     def _build_window_condition(

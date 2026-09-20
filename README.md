@@ -83,7 +83,8 @@ pwru policy run --policy my-policy.yaml
 
 ## Features
 
-**Process & Window Matching**  
+### Process & Window Matching
+
 Match rules based on processes and window titles.
 
 ```yaml
@@ -97,9 +98,9 @@ Match rules based on processes and window titles.
     title: "Firefox"
     exists: true
 ```
-<br>
 
-**Regex Matching**  
+### Regex Matching
+
 Match process names and window titles using regular expressions with full-string matching.
 
 ```yaml
@@ -118,33 +119,32 @@ Match process names and window titles using regular expressions with full-string
       type: regex
       case_sensitive: false
 ```
-<br>
 
-**Time-based Conditions**  
-Match specific dates, time ranges and weekdays. If both `between` and `weekday` are configured, both must match. The end of a range is always exclusive.
+### Time-based Conditions
+
+Match specific dates, time ranges, weekdays and months. If several of `between`, `weekday` and `month` are configured, all of them must match. The end of a range is always exclusive.
 
 ```yaml
-# Match if the current time is between 23:00 and 1:30
+# Match every day from 23:00 until 1:30 the next morning
 - datetime:
     between:
       start: "23"
       end: "1:30"
 
-# Match on Monday or Friday
+# Match on Mondays and Fridays
 - datetime:
     weekday:
       - "Monday"
       - "Friday"
 
-# Match from Monday 23:00 until Tuesday 1:30 (the weekday refers to the day on which the time range starts)
+# Match in June, July and August
 - datetime:
-    between:
-      start: "23"
-      end: "1:30"
-    weekday:
-      - "Monday"
+    month:
+      - "June"
+      - "July"
+      - "August"
 
-# Match on the whole days 2026-08-21 and 2026-08-22 (the end date is not included)
+# Match on the whole days 2026-08-21 and 2026-08-22 (the end date 2026-08-23 is not included)
 - datetime:
     between:
       start: "2026-08-21"
@@ -156,7 +156,7 @@ Match specific dates, time ranges and weekdays. If both `between` and `weekday` 
       start: "2026-08-21 18:00"
       end: "2026-08-23 6:00"
 
-   # Match on Saturdays and Sundays from 2026-08-21 until the end of 2026 (the weekday refers to the current day)
+# Match on Saturdays and Sundays from 2026-08-21 until the end of 2026
 - datetime:
     between:
       start: "2026-08-21"
@@ -164,14 +164,25 @@ Match specific dates, time ranges and weekdays. If both `between` and `weekday` 
     weekday:
       - "Saturday"
       - "Sunday"
+
+# Match on Saturday and Sunday nights in December from 22:00 until 6:00 the next morning
+- datetime:
+    between:
+      start: "22"
+      end: "6"
+    weekday:
+      - "Saturday"
+      - "Sunday"
+    month:
+      - "December"
 ```
-<br>
 
-`start` and `end` must be of the same kind: both dates (`"2026-08-21"`), both times (`"23"`, `"1:30"`) or both dates with a time (`"2026-08-21 18:00"`, a `T` instead of the space is also allowed).
+`start` and `end` must be of the same kind: both times, both dates or both dates with a time. All values use the local time of the computer, timezones are not supported.
 
-Times without a date repeat every day and may cross midnight. All values use the local time of the computer, timezones are currently not supported.
+If a time range crosses midnight, `weekday` and `month` refer to the day on which the range starts. For dates, they refer to the current day.
 
-**Logical Conditions**  
+### Logical Conditions
+
 Combine multiple conditions using `and`, `or`, and `not`.
 
 ```yaml
@@ -183,9 +194,9 @@ Combine multiple conditions using `and`, `or`, and `not`.
     - not:
         condition_3: ...
 ```
-<br>
 
-**Power Actions**  
+### Power Actions
+
 Shutdown, sleep, hibernate, or reboot your computer.
 
 ```yaml
@@ -197,9 +208,9 @@ Shutdown, sleep, hibernate, or reboot your computer.
 - action:
     type: reboot
 ```
-<br>
 
-**Continuous Evaluation**  
+### Continuous Evaluation
+
 Evaluate rules at a set interval.
 
 ```bash

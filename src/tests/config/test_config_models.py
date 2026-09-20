@@ -3,7 +3,7 @@ from datetime import date, datetime, time, timezone
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from powerrules.conditions.datetime import Weekday
+from powerrules.conditions.datetime import Month, Weekday
 from powerrules.config.models import (
     DateRangeConfiguration,
     DateTimeConditionConfiguration,
@@ -282,7 +282,7 @@ def test_datetime_configuration_accepts_weekday_only() -> None:
 def test_datetime_configuration_rejects_empty_configuration() -> None:
     with pytest.raises(
         ValidationError,
-        match="at least one criterion of 'between' or 'weekday'",
+        match="at least one criterion of 'between', 'weekday' or 'month'",
     ):
         DateTimeConditionConfiguration.model_validate({})
 
@@ -707,3 +707,148 @@ def test_datetime_range_configuration_rejects_date_object() -> None:
 def test_datetime_range_configuration_rejects_non_string_value() -> None:
     with pytest.raises(ValidationError, match="Datetime value must be a string"):
         DateTimeRangeConfiguration.model_validate({"start": 5, "end": 6})
+
+
+#############
+# Month tests
+#############
+
+
+def test_datetime_configuration_accepts_month_only() -> None:
+    configuration = DateTimeConditionConfiguration.model_validate(
+        {"month": ["June", "July"]}
+    )
+
+    assert configuration.between is None
+    assert configuration.weekday is None
+    assert configuration.month == [Month.JUNE, Month.JULY]
+
+
+def test_datetime_configuration_accepts_none_month() -> None:
+    configuration = DateTimeConditionConfiguration.model_validate(
+        {"month": None, "weekday": ["Monday"]}
+    )
+
+    assert configuration.month is None
+
+
+def test_datetime_configuration_accepts_between_weekday_and_month() -> None:
+    configuration = DateTimeConditionConfiguration.model_validate(
+        {
+            "between": {
+                "start": "22",
+                "end": "6",
+            },
+            "weekday": ["Saturday", "Sunday"],
+            "month": ["December"],
+        }
+    )
+
+    assert isinstance(configuration.between, TimeRangeConfiguration)
+    assert configuration.weekday == [Weekday.SATURDAY, Weekday.SUNDAY]
+    assert configuration.month == [Month.DECEMBER]
+
+
+@pytest.mark.parametrize("month", list(Month))
+def test_datetime_configuration_parses_every_month_name_regardless_of_case(
+    month: Month,
+) -> None:
+    for name in (month.value, month.value.lower(), month.value.upper()):
+        configuration = DateTimeConditionConfiguration.model_validate({"month": [name]})
+
+        assert configuration.month == [month]
+
+
+def test_datetime_configuration_parses_mixed_case_month_list() -> None:
+    configuration = DateTimeConditionConfiguration.model_validate(
+        {"month": ["june", "JULY", "August", "sEpTeMbEr"]}
+    )
+
+    assert configuration.month == [
+        Month.JUNE,
+        Month.JULY,
+        Month.AUGUST,
+        Month.SEPTEMBER,
+    ]
+
+
+def test_datetime_configuration_rejects_empty_month_list() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="'month' list must contain at least one month",
+    ):
+        DateTimeConditionConfiguration.model_validate({"month": []})
+
+
+# Names have to be complete English month names, only the case is ignored
+@pytest.mark.parametrize("invalid_month", ["Jun", "Marchh", "", "13", "März", 5, None])
+def test_datetime_configuration_rejects_unknown_month(invalid_month: object) -> None:
+    with pytest.raises(ValidationError, match="Input should be"):
+        DateTimeConditionConfiguration.model_validate({"month": [invalid_month]})
+
+
+@pytest.mark.parametrize("month", ["June", "june"])
+def test_datetime_configuration_rejects_month_which_is_not_a_list(month: str) -> None:
+    with pytest.raises(ValidationError, match="valid list"):
+        DateTimeConditionConfiguration.model_validate({"month": month})
+
+
+###############
+# Weekday tests
+###############
+
+
+@pytest.mark.parametrize("weekday", list(Weekday))
+def test_datetime_configuration_parses_every_weekday_name_regardless_of_case(
+    weekday: Weekday,
+) -> None:
+    for name in (weekday.value, weekday.value.lower(), weekday.value.upper()):
+        configuration = DateTimeConditionConfiguration.model_validate(
+            {"weekday": [name]}
+        )
+
+        assert configuration.weekday == [weekday]
+
+
+def test_datetime_configuration_parses_mixed_case_weekday_list() -> None:
+    configuration = DateTimeConditionConfiguration.model_validate(
+        {"weekday": ["monday", "FRIDAY", "Sunday", "sAtUrDaY"]}
+    )
+
+    assert configuration.weekday == [
+        Weekday.MONDAY,
+        Weekday.FRIDAY,
+        Weekday.SUNDAY,
+        Weekday.SATURDAY,
+    ]
+
+
+def test_datetime_configuration_parses_weekday_and_month_regardless_of_case() -> None:
+    configuration = DateTimeConditionConfiguration.model_validate(
+        {
+            "weekday": ["saturday", "SUNDAY"],
+            "month": ["december"],
+        }
+    )
+
+    assert configuration.weekday == [Weekday.SATURDAY, Weekday.SUNDAY]
+    assert configuration.month == [Month.DECEMBER]
+
+
+# Names have to be complete English weekday names, only the case is ignored
+@pytest.mark.parametrize(
+    "invalid_weekday", ["Mon", "Mondayy", "", "1", "Montag", 5, None]
+)
+def test_datetime_configuration_rejects_unknown_weekday_names(
+    invalid_weekday: object,
+) -> None:
+    with pytest.raises(ValidationError, match="Input should be"):
+        DateTimeConditionConfiguration.model_validate({"weekday": [invalid_weekday]})
+
+
+@pytest.mark.parametrize("weekday", ["Monday", "monday"])
+def test_datetime_configuration_rejects_weekday_which_is_not_a_list(
+    weekday: str,
+) -> None:
+    with pytest.raises(ValidationError, match="valid list"):
+        DateTimeConditionConfiguration.model_validate({"weekday": weekday})

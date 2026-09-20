@@ -5,6 +5,7 @@ import pytest
 from powerrules.conditions.datetime import (
     DateTimeCondition,
     DateTimeRange,
+    Month,
     TimeRange,
     Weekday,
 )
@@ -499,6 +500,163 @@ def test_datetime_condition_does_not_shift_weekday_for_range_within_one_day(
             end=time(18, 0),
         ),
         weekdays=frozenset({weekday}),
+    )
+
+    assert condition.evaluate() is expected
+
+
+##################################
+# DateTimeCondition tests (months)
+##################################
+
+
+def test_datetime_condition_matches_configured_month() -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        months=frozenset({Month.AUGUST}),
+    )
+
+    assert condition.evaluate() is True
+
+
+def test_datetime_condition_does_not_match_unconfigured_month() -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        months=frozenset({Month.SEPTEMBER}),
+    )
+
+    assert condition.evaluate() is False
+
+
+def test_datetime_condition_matches_one_of_multiple_months() -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        months=frozenset({Month.JULY, Month.AUGUST, Month.SEPTEMBER}),
+    )
+
+    assert condition.evaluate() is True
+
+
+@pytest.mark.parametrize(
+    ("current_datetime", "expected"),
+    [
+        # The last moment of the previous month
+        (datetime(2026, 7, 31, 23, 59, 59), False),
+        # The first moment of the month
+        (datetime(2026, 8, 1, 0, 0), True),
+        # The last moment of the month
+        (datetime(2026, 8, 31, 23, 59, 59), True),
+        # The first moment of the next month
+        (datetime(2026, 9, 1, 0, 0), False),
+    ],
+)
+def test_datetime_condition_month_boundaries(
+    current_datetime: datetime,
+    expected: bool,
+) -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(current_datetime),
+        months=frozenset({Month.AUGUST}),
+    )
+
+    assert condition.evaluate() is expected
+
+
+# Every month number has to be mapped to the correct month
+@pytest.mark.parametrize(("month_number", "month"), list(enumerate(Month, start=1)))
+def test_datetime_condition_maps_every_month_number_to_its_month(
+    month_number: int,
+    month: Month,
+) -> None:
+    clock_provider = Dummy_ClockProvider(datetime(2026, month_number, 15, 12, 0))
+
+    matching_condition = DateTimeCondition(
+        clock_provider=clock_provider,
+        months=frozenset({month}),
+    )
+    other_months_condition = DateTimeCondition(
+        clock_provider=clock_provider,
+        months=frozenset(set(Month) - {month}),
+    )
+
+    assert matching_condition.evaluate() is True
+    assert other_months_condition.evaluate() is False
+
+
+# 2026-08-21 is a Friday
+@pytest.mark.parametrize(
+    ("weekday", "month", "expected"),
+    [
+        (Weekday.FRIDAY, Month.AUGUST, True),
+        (Weekday.FRIDAY, Month.SEPTEMBER, False),
+        (Weekday.SATURDAY, Month.AUGUST, False),
+    ],
+)
+def test_datetime_condition_requires_weekday_and_month_to_match(
+    weekday: Weekday,
+    month: Month,
+    expected: bool,
+) -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        weekdays=frozenset({weekday}),
+        months=frozenset({month}),
+    )
+
+    assert condition.evaluate() is expected
+
+
+# For a time range crossing midnight the month refers to the day on which the range starts
+@pytest.mark.parametrize(
+    ("current_datetime", "expected"),
+    [
+        # Start of the range on the last day of December
+        (datetime(2026, 12, 31, 23, 30), True),
+        # After midnight the range still belongs to December 31
+        (datetime(2027, 1, 1, 1, 0), True),
+        # After midnight the range belongs to November 30 (the range started in November)
+        (datetime(2026, 12, 1, 0, 30), False),
+        # Range which starts on the first day of December
+        (datetime(2026, 12, 1, 23, 30), True),
+        # Range which starts on the first day of January
+        (datetime(2027, 1, 1, 23, 30), False),
+    ],
+)
+def test_datetime_condition_uses_start_month_for_range_crossing_midnight(
+    current_datetime: datetime,
+    expected: bool,
+) -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(current_datetime),
+        time_range=TimeRange(
+            start=time(23, 0),
+            end=time(1, 30),
+        ),
+        months=frozenset({Month.DECEMBER}),
+    )
+
+    assert condition.evaluate() is expected
+
+
+# For an absolute range the month refers to the current day
+@pytest.mark.parametrize(
+    ("current_datetime", "expected"),
+    [
+        (datetime(2026, 11, 30, 23, 30), False),
+        (datetime(2026, 12, 1, 1, 0), True),
+    ],
+)
+def test_datetime_condition_uses_current_month_for_datetime_range(
+    current_datetime: datetime,
+    expected: bool,
+) -> None:
+    condition = DateTimeCondition(
+        clock_provider=Dummy_ClockProvider(current_datetime),
+        datetime_range=DateTimeRange(
+            start=datetime(2026, 11, 30, 23, 0),
+            end=datetime(2026, 12, 1, 2, 0),
+        ),
+        months=frozenset({Month.DECEMBER}),
     )
 
     assert condition.evaluate() is expected

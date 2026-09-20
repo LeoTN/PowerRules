@@ -17,6 +17,23 @@ class Weekday(StrEnum):
     SUNDAY = "Sunday"
 
 
+class Month(StrEnum):
+    """Represent all months."""
+
+    JANUARY = "January"
+    FEBRUARY = "February"
+    MARCH = "March"
+    APRIL = "April"
+    MAY = "May"
+    JUNE = "June"
+    JULY = "July"
+    AUGUST = "August"
+    SEPTEMBER = "September"
+    OCTOBER = "October"
+    NOVEMBER = "November"
+    DECEMBER = "December"
+
+
 @dataclass(frozen=True)
 class TimeRange:
     """Represents a range of time within a day."""
@@ -76,11 +93,17 @@ class DateTimeCondition:
         time_range: TimeRange | None = None,
         datetime_range: DateTimeRange | None = None,
         weekdays: frozenset[Weekday] | None = None,
+        months: frozenset[Month] | None = None,
     ):
         # This is usually verified by Pydantic
-        if time_range is None and datetime_range is None and weekdays is None:
+        if (
+            time_range is None
+            and datetime_range is None
+            and weekdays is None
+            and months is None
+        ):
             raise ValueError(
-                "A datetime condition requires at least one criterion of 'time_range', 'datetime_range' or 'weekdays'"
+                "A datetime condition requires at least one criterion of 'time_range', 'datetime_range', 'weekdays' or 'months'"
             )
 
         # This shouldn't happen because Pydantic only allows one of them. Combining both of them is technically possible, but could lead to unexpected behavior
@@ -93,18 +116,19 @@ class DateTimeCondition:
         self.time_range = time_range
         self.datetime_range = datetime_range
         self.weekdays = weekdays
+        self.months = months
 
     def evaluate(self) -> bool:
-        """Evaluate the configured date, time and weekday criteria.
+        """Evaluate the configured date, time, weekday and month criteria.
 
-        If the time range crosses midnight, the weekday refers to the day on
-        which the range starts. For example, with the range 23:00-1:30 and the
-        weekday Monday, the condition matches from Monday 23:00 until Tuesday 1:30.
+        If the time range crosses midnight, the weekday and the month refer to the day on which the range starts.
+        For example, with the range 23:00-1:30 and the weekday Monday, the condition matches from Monday 23:00 until Tuesday 1:30.
+        With the month December, the condition matches from December 31 23:00 until January 1 1:30.
 
-        For an absolute datetime range, the weekday refers to the current day.
+        For an absolute datetime range, the weekday and the month refer to the current day.
 
         Returns:
-            True if the current date, time and weekday match the condition, otherwise False.
+            True if the current date, time, weekday and month match the condition, otherwise False.
         """
 
         current_datetime = self.clock_provider.now()
@@ -142,6 +166,13 @@ class DateTimeCondition:
             )[reference_datetime.weekday()]
 
             if current_weekday not in self.weekdays:
+                return False
+
+        if self.months is not None:
+            # The enum members are defined in calendar order, so the month number is the position
+            current_month = tuple(Month)[reference_datetime.month - 1]
+
+            if current_month not in self.months:
                 return False
 
         # All configured criteria are satisfied

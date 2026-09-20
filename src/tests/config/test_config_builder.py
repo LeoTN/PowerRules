@@ -10,6 +10,7 @@ from powerrules.actions.power import (
 from powerrules.conditions.datetime import (
     DateTimeCondition,
     DateTimeRange,
+    Month,
     TimeRange,
     Weekday,
 )
@@ -436,6 +437,91 @@ def test_configuration_builder_builds_time_range_without_datetime_range() -> Non
     )
     assert rule.condition.datetime_range is None
     assert rule.condition.weekdays is None
+
+
+def test_configuration_builder_builds_month_condition() -> None:
+    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0))
+
+    configuration = RuleSetConfiguration(
+        rules=[
+            RuleConfiguration(
+                name="Month rule",
+                conditions=ConditionConfiguration(
+                    datetime=DateTimeConditionConfiguration(
+                        month=[Month.AUGUST, Month.SEPTEMBER],
+                    )
+                ),
+                action=ActionConfiguration(
+                    type="shutdown",
+                ),
+            )
+        ]
+    )
+
+    builder = ConfigurationBuilder(
+        clock_provider=clock_provider,
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
+        power_provider=Dummy_PowerProvider(),
+    )
+
+    rule = builder.build(configuration).rules[0]
+
+    assert isinstance(rule.condition, DateTimeCondition)
+    assert rule.condition.clock_provider is clock_provider
+    assert rule.condition.months == frozenset({Month.AUGUST, Month.SEPTEMBER})
+    assert rule.condition.time_range is None
+    assert rule.condition.datetime_range is None
+    assert rule.condition.weekdays is None
+
+    # The built condition matches the configured months, but not other ones
+    assert rule.condition.evaluate() is True
+
+    clock_provider.given_time = datetime(2026, 10, 1, 12, 0)
+
+    assert rule.condition.evaluate() is False
+
+
+def test_configuration_builder_builds_month_with_other_criteria() -> None:
+    configuration = RuleSetConfiguration(
+        rules=[
+            RuleConfiguration(
+                name="Month with other criteria rule",
+                conditions=ConditionConfiguration(
+                    datetime=DateTimeConditionConfiguration(
+                        between=TimeRangeConfiguration(
+                            start=time(22, 0),
+                            end=time(6, 0),
+                        ),
+                        weekday=[Weekday.FRIDAY],
+                        month=[Month.AUGUST],
+                    )
+                ),
+                action=ActionConfiguration(
+                    type="shutdown",
+                ),
+            )
+        ]
+    )
+
+    builder = ConfigurationBuilder(
+        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 23, 0)),
+        process_provider=patch("powerrules.providers.process.ProcessProvider").start(),
+        window_provider=patch("powerrules.providers.window.WindowProvider").start(),
+        power_provider=Dummy_PowerProvider(),
+    )
+
+    rule = builder.build(configuration).rules[0]
+
+    assert isinstance(rule.condition, DateTimeCondition)
+    assert rule.condition.time_range == TimeRange(
+        start=time(22, 0),
+        end=time(6, 0),
+    )
+    assert rule.condition.datetime_range is None
+    assert rule.condition.weekdays == frozenset({Weekday.FRIDAY})
+    assert rule.condition.months == frozenset({Month.AUGUST})
+    assert rule.condition.evaluate() is True
 
 
 #######################

@@ -1,6 +1,7 @@
 import re
 from datetime import date, datetime, time
-from typing import Annotated, Literal
+from enum import StrEnum
+from typing import Annotated, Literal, TypeVar
 
 from pydantic import (
     BaseModel,
@@ -9,12 +10,15 @@ from pydantic import (
     Field,
     StrictBool,
     Tag,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
 
-from powerrules.conditions.datetime import Weekday
+from powerrules.conditions.datetime import Month, Weekday
 from powerrules.conditions.matcher import MatchType
+
+EnumType = TypeVar("EnumType", bound=StrEnum)
 
 _DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _DATETIME_PATTERN = re.compile(r"(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})[ T](?P<time>.+)")
@@ -220,27 +224,74 @@ class DateTimeConditionConfiguration(BaseModel):
 
     between: BetweenConfiguration | None = None
     weekday: list[Weekday] | None = None
+    month: list[Month] | None = None
+
+    @field_validator("weekday", "month", mode="before")
+    @classmethod
+    def validate_names_case_insensitive(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> object:
+        """Match the configured weekday or month names regardless of their case.
+
+        Args:
+            value: Configured weekday or month names.
+            info: Validation information containing the name of the field.
+
+        Returns:
+            The value with all matching names replaced by their weekday or month.
+            Anything else is returned unchanged, so it is rejected by the regular validation.
+        """
+        if not isinstance(value, list):
+            return value
+
+        enum_type = Weekday if info.field_name == "weekday" else Month
+
+        return [_match_enum_case_insensitive(enum_type, item) for item in value]
+
+    @field_validator("weekday", "month")
+    @classmethod
+    def validate_list_not_empty(
+        cls,
+        value: list[Weekday] | list[Month] | None,
+        info: ValidationInfo,
+    ) -> list[Weekday] | list[Month] | None:
+        """Validate that a configured weekday or month list is not empty.
+
+        Args:
+            value: Configured weekdays or months, or None if not configured.
+            info: Validation information containing the name of the field.
+
+        Returns:
+            The validated list.
+
+        Raises:
+            ValueError: If the list is empty.
+        """
+        if value is not None and len(value) == 0:
+            raise ValueError(
+                f"The '{info.field_name}' list must contain at least one {info.field_name}"
+            )
+
+        return value
 
     @model_validator(mode="after")
     def validate_criteria(self) -> "DateTimeConditionConfiguration":
-        """Validate that at least one datetime criterion is configured."""
-        if self.between is None and self.weekday is None:
+        """Validate that at least one datetime criterion is configured.
+
+        Returns:
+            The validated configuration.
+
+        Raises:
+            ValueError: If none of 'between', 'weekday' and 'month' is configured.
+        """
+        if self.between is None and self.weekday is None and self.month is None:
             raise ValueError(
-                "A datetime condition must define at least one criterion of 'between' or 'weekday'"
+                "A datetime condition must define at least one criterion of 'between', 'weekday' or 'month'"
             )
 
         return self
-
-    @field_validator("weekday")
-    @classmethod
-    def validate_weekday_not_empty(
-        cls, value: list[Weekday] | None
-    ) -> list[Weekday] | None:
-        """Validate that the configured weekday list is not empty."""
-        if value is not None and len(value) == 0:
-            raise ValueError("The 'weekday' list must contain at least one weekday")
-
-        return value
 
 
 class WindowConditionConfiguration(BaseModel):
@@ -467,3 +518,24 @@ def _parse_datetime(value: object) -> datetime:
         )
 
     return datetime.combine(_parse_date(parts["date"]), _parse_time(time_part))
+
+
+def _match_enum_case_insensitive(enum_type: type[EnumType], value: object) -> object:
+    """Find the enum member whose value matches the given value regardless of case.
+
+    Args:
+        enum_type: Enum whose members are compared.
+        value: Value to match.
+
+    Returns:
+        The matching enum member. If nothing matches, the value is returned
+        unchanged, so the regular validation reports the error including the valid values.
+    """
+    if not isinstance(value, str):
+        return value
+
+    for member in enum_type:
+        if member.value.casefold() == value.casefold():
+            return member
+
+    return value
