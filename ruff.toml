@@ -1,0 +1,7 @@
+[lint.per-file-ignores]
+
+# The tests deliberately use naive datetimes like the application itself
+"src/tests/**" = ["DTZ001", "DTZ005"]
+
+# Pydantic only converts ValueError (not TypeError) raised in validators into a ValidationError
+"src/powerrules/config/models.py" = ["TRY004"]
