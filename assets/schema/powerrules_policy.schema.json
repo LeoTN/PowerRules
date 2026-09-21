@@ -150,44 +150,65 @@
         },
         "dateTimeCondition": {
             "type": "object",
-            "oneOf": [
-                {
-                    "required": [
-                        "between"
-                    ],
-                    "properties": {
-                        "between": {
-                            "$ref": "#/$defs/timeRange",
-                            "description": "Time range during which the condition is satisfied."
+            "description": "Matches if all configured criteria are satisfied. If several of 'between', 'weekday' and 'month' are configured, all of them must match.",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+                "between": {
+                    "description": "Range during which the condition is satisfied. The start is inclusive and the end is exclusive. Use times of day for a range which repeats every day (it may cross midnight), or dates (optionally with a time) for a single absolute range. Both boundaries must be of the same kind.",
+                    "oneOf": [
+                        {
+                            "$ref": "#/$defs/dateRange"
+                        },
+                        {
+                            "$ref": "#/$defs/timeRange"
+                        },
+                        {
+                            "$ref": "#/$defs/dateTimeRange"
                         }
+                    ]
+                },
+                "weekday": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "List of weekdays on which the condition is satisfied. If the time range crosses midnight, the weekday refers to the day on which the range starts. For an absolute range, the weekday refers to the current day.",
+                    "items": {
+                        "$ref": "#/$defs/weekday"
                     }
                 },
-                {
-                    "required": [
-                        "weekday"
-                    ],
-                    "properties": {
-                        "weekday": {
-                            "type": "array",
-                            "minItems": 1,
-                            "description": "List of weekdays on which the condition is satisfied.",
-                            "items": {
-                                "type": "string",
-                                "enum": [
-                                    "Monday",
-                                    "Tuesday",
-                                    "Wednesday",
-                                    "Thursday",
-                                    "Friday",
-                                    "Saturday",
-                                    "Sunday"
-                                ]
-                            }
-                        }
+                "month": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "List of months in which the condition is satisfied. If the time range crosses midnight, the month refers to the day on which the range starts. For an absolute range, the month refers to the current day.",
+                    "items": {
+                        "$ref": "#/$defs/month"
                     }
                 }
+            }
+        },
+        "dateRange": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Absolute range between two dates. The whole days are covered starting at midnight.",
+            "required": [
+                "start",
+                "end"
             ],
-            "unevaluatedProperties": false
+            "properties": {
+                "start": {
+                    "$ref": "#/$defs/date",
+                    "description": "First date of the range (inclusive, starts at 0:00)."
+                },
+                "end": {
+                    "$ref": "#/$defs/date",
+                    "description": "End date of the range (exclusive, the range ends at 0:00 of this date)."
+                }
+            }
+        },
+        "date": {
+            "type": "string",
+            "description": "Date in YYYY-MM-DD format.",
+            "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])$"
         },
         "timeRange": {
             "type": "object",
@@ -211,6 +232,46 @@
             "type": "string",
             "description": "Time in H, HH, H:MM, HH:MM, H:MM:SS, or HH:MM:SS format.",
             "pattern": "^(?:[0-9]|[01][0-9]|2[0-3])(?::[0-5][0-9](?::[0-5][0-9])?)?$"
+        },
+        "dateTimeRange": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Absolute range between two points in time without timezone.",
+            "required": [
+                "start",
+                "end"
+            ],
+            "properties": {
+                "start": {
+                    "$ref": "#/$defs/dateTime",
+                    "description": "Start of the range (inclusive)."
+                },
+                "end": {
+                    "$ref": "#/$defs/dateTime",
+                    "description": "End of the range (exclusive)."
+                }
+            }
+        },
+        "dateTime": {
+            "type": "string",
+            "description": "Date in YYYY-MM-DD format followed by a space or a T and a time in H, HH, H:MM, HH:MM, H:MM:SS, or HH:MM:SS format. Timezones are not supported.",
+            "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])[ T](?:[0-9]|[01][0-9]|2[0-3])(?::[0-5][0-9](?::[0-5][0-9])?)?$"
+        },
+        "weekday": {
+            "type": "string",
+            "description": "English case insensitive name of a weekday.",
+            "pattern": "^(?:[Mm][Oo][Nn][Dd][Aa][Yy]|[Tt][Uu][Ee][Ss][Dd][Aa][Yy]|[Ww][Ee][Dd][Nn][Ee][Ss][Dd][Aa][Yy]|[Tt][Hh][Uu][Rr][Ss][Dd][Aa][Yy]|[Ff][Rr][Ii][Dd][Aa][Yy]|[Ss][Aa][Tt][Uu][Rr][Dd][Aa][Yy]|[Ss][Uu][Nn][Dd][Aa][Yy])$",
+            "examples": [
+                "Monday"
+            ]
+        },
+        "month": {
+            "type": "string",
+            "description": "English case insensitive name of a month.",
+            "pattern": "^(?:[Jj][Aa][Nn][Uu][Aa][Rr][Yy]|[Ff][Ee][Bb][Rr][Uu][Aa][Rr][Yy]|[Mm][Aa][Rr][Cc][Hh]|[Aa][Pp][Rr][Ii][Ll]|[Mm][Aa][Yy]|[Jj][Uu][Nn][Ee]|[Jj][Uu][Ll][Yy]|[Aa][Uu][Gg][Uu][Ss][Tt]|[Ss][Ee][Pp][Tt][Ee][Mm][Bb][Ee][Rr]|[Oo][Cc][Tt][Oo][Bb][Ee][Rr]|[Nn][Oo][Vv][Ee][Mm][Bb][Ee][Rr]|[Dd][Ee][Cc][Ee][Mm][Bb][Ee][Rr])$",
+            "examples": [
+                "January"
+            ]
         },
         "windowCondition": {
             "type": "object",
