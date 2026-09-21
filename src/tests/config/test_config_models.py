@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -642,8 +642,8 @@ def test_datetime_range_configuration_rejects_timezone_aware_datetime_object() -
         DateTimeConditionConfiguration.model_validate(
             {
                 "between": {
-                    "start": datetime(2026, 8, 21, 18, 0, tzinfo=timezone.utc),
-                    "end": datetime(2026, 8, 22, 6, 0, tzinfo=timezone.utc),
+                    "start": datetime(2026, 8, 21, 18, 0, tzinfo=UTC),
+                    "end": datetime(2026, 8, 22, 6, 0, tzinfo=UTC),
                 }
             }
         )
