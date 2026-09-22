@@ -15,7 +15,7 @@ class PyWinCtlWindowProvider:
             self._pywinctl = pywinctl
 
         # This exception is common on headless systems (e.g. Ubuntu Server)
-        except Exception:
+        except Exception:  # noqa: BLE001 (no need to handle the exception)
             typer.echo(
                 "[WARNING] Failed to load window provider. Window conditions will not be available",
                 err=True,

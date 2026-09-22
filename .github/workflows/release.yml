@@ -21,6 +21,8 @@ permissions:
 env:
   PACKAGE_NAME: "powerrules"
   PYPI_REPOSITORY_URL: "https://upload.pypi.org/legacy/"
+  # Normal (non-beta) releases can only be published from this branch
+  STABLE_RELEASE_BRANCH: "main"
 
 jobs:
   validate_version:
@@ -32,8 +34,10 @@ jobs:
       - name: Validate version input
         id: check_version
         shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          VERSION="${{ inputs.version }}"
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(b[0-9]+)?$ ]]; then
               echo "Invalid version format: $VERSION"
               echo "Use X.Y.Z or X.Y.ZbN (only normal or beta releases allowed)"
@@ -44,6 +48,12 @@ jobs:
                   echo "Version $VERSION is a beta release"
                   echo "is_beta=true" >> "$GITHUB_OUTPUT"
               else
+                  # Normal releases are only allowed from the release branch, so that only merged changes are released
+                  if [[ "$REF_NAME" != "$STABLE_RELEASE_BRANCH" ]]; then
+                      echo "[ERROR] Normal releases can only be published from the '$STABLE_RELEASE_BRANCH' branch (current ref: $REF_NAME)"
+                      exit 1
+                  fi
+
                   echo "Version $VERSION is a normal release"
                   echo "is_beta=false" >> "$GITHUB_OUTPUT"
               fi
@@ -63,16 +73,34 @@ jobs:
 
       - name: Extract tag and gather_details
         id: release
+        env:
+          TAG_NAME: ${{ inputs.version }}
         run: |
-          TAG_NAME="${{ inputs.version }}"
-          NEW_VERSION=$(echo $TAG_NAME | awk -F'-' '{print $1}')
-          SUFFIX=$(echo $TAG_NAME | grep -oP '[a-z]+[0-9]+' || echo "")
+          NEW_VERSION=$(echo "$TAG_NAME" | awk -F'-' '{print $1}')
+          SUFFIX=$(echo "$TAG_NAME" | grep -oP '[a-z]+[0-9]+' || echo "")
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
           echo "Version is $NEW_VERSION"
           echo "Suffix is $SUFFIX"
           echo "Tag name is $TAG_NAME"
+
+      - name: Ensure the tag does not exist yet
+        env:
+          TAG_NAME: ${{ inputs.version }}
+        run: |
+          status=0
+          git ls-remote --exit-code --tags origin "refs/tags/$TAG_NAME" > /dev/null || status=$?
+
+          if [ "$status" -eq 0 ]; then
+            echo "[ERROR] The tag $TAG_NAME already exists"
+            exit 1
+          elif [ "$status" -ne 2 ]; then
+            echo "[ERROR] Could not check whether the tag $TAG_NAME exists (exit code $status)"
+            exit 1
+          fi
+
+          echo "[INFO] The tag $TAG_NAME does not exist yet"
 
   check_pypi:
     name: Check version on PyPI
@@ -90,7 +118,7 @@ jobs:
       - name: Fetch latest PyPI version
         run: |
           # Get the latest version from PyPI
-          latest_previous_version=$(curl -s https://pypi.org/pypi/${{ env.PACKAGE_NAME }}/json | \
+          latest_previous_version=$(curl -s "https://pypi.org/pypi/$PACKAGE_NAME/json" | \
           grep -Po '"version":\s*"\K[0-9A-Za-z\.\-]+(?=")' | tail -n 1)
 
           if [ -z "$latest_previous_version" ]; then
@@ -102,13 +130,17 @@ jobs:
           echo "latest_previous_version=$latest_previous_version" >> $GITHUB_ENV
 
       - name: Compare versions and exit if not newer
+        env:
+          NEW_VERSION: ${{ needs.gather_details.outputs.new_version }}
         run: |
-          python3 - <<EOF
+          python3 - <<'EOF'
+          import os
           import sys
+
           from packaging.version import parse
 
-          new_version = parse("${{ needs.gather_details.outputs.new_version }}")
-          latest_version = parse("$latest_previous_version")
+          new_version = parse(os.environ["NEW_VERSION"])
+          latest_version = parse(os.environ["latest_previous_version"])
 
           if new_version > latest_version:
               print(f"[INFO] The new version {new_version} is greater than the latest version {latest_version} on PyPI")
@@ -117,26 +149,34 @@ jobs:
               sys.exit(1)
           EOF
 
+  tests:
+    name: Run tests
+    needs: check_pypi
+    uses: ./.github/workflows/tests.yml
+
   build_and_publish:
     name: Build and publish package to PyPI
-    needs: [gather_details, check_pypi]
+    needs: [gather_details, check_pypi, tests]
     runs-on: ubuntu-latest
+    env:
+      # The version is not stored in the repository, it is set explicitly for this run
+      POETRY_DYNAMIC_VERSIONING_BYPASS: ${{ needs.gather_details.outputs.new_version }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Build exactly the commit which is tagged by the release later
+          ref: ${{ github.sha }}
+
+      # https://github.com/actions/setup-python/blob/v7/docs/advanced-usage.md#caching-packages
+      - name: Install poetry
+        run: |
+          pipx install poetry==2.4.1
 
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-
-      - name: Install Poetry
-        uses: abatilo/actions-poetry@v4
-        with:
-          poetry-version: "2.4.1"
-
-      - name: Set project version with Poetry
-        run: |
-          poetry version ${{ needs.gather_details.outputs.new_version }}
+          cache: "poetry"
 
       - name: Install dependencies
         run: |
@@ -147,64 +187,34 @@ jobs:
         run: |
           poetry build
 
-      - name: Publish to PyPI
+      - name: Verify built version
+        env:
+          VERSION: ${{ needs.gather_details.outputs.new_version }}
         run: |
-          poetry config repositories.pypirepository ${{ env.PYPI_REPOSITORY_URL }}
-          poetry publish --repository pypirepository --username __token__ --password ${{ secrets.PYPI_API_TOKEN }}
+          # Make sure that the versioning plugin was active, otherwise the placeholder 0.0.0 would be published
+          for file in dist/*; do
+            case "$(basename "$file")" in
+              "${PACKAGE_NAME}-${VERSION}.tar.gz" | "${PACKAGE_NAME}-${VERSION}-"*.whl) ;;
+              *)
+                echo "[ERROR] Unexpected file in dist: $file (expected version $VERSION)"
+                exit 1
+                ;;
+            esac
+          done
+          ls dist/
+
+      - name: Publish to PyPI
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          poetry config repositories.pypirepository "$PYPI_REPOSITORY_URL"
+          poetry publish --repository pypirepository --username __token__ --password "$PYPI_API_TOKEN"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
-
-  commit_version_bump:
-    name: Commit version bump
-    needs: [gather_details, build_and_publish]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      commit_sha: ${{ steps.commit.outputs.commit_sha }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-
-      - name: Install Poetry
-        uses: abatilo/actions-poetry@v4
-        with:
-          poetry-version: "2.4.1"
-
-      - name: Set project version with Poetry
-        run: |
-          poetry version ${{ needs.gather_details.outputs.new_version }}
-
-      - name: Commit version bump
-        id: commit
-        env:
-          VERSION: ${{ needs.gather_details.outputs.new_version }}
-          BRANCH_NAME: ${{ github.ref_name }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add pyproject.toml
-
-          if git diff --cached --quiet; then
-              echo "[INFO] No version change detected"
-          else
-              git commit -m "bump version to $VERSION"
-              git push origin "HEAD:$BRANCH_NAME"
-          fi
-
-          echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   delete_old_betas:
     name: Cleanup old beta tags and releases
@@ -237,11 +247,11 @@ jobs:
             echo "[INFO] Deleting beta release and tag: $tag"
 
             # Get release ID(s) for the tag
-            RELEASE_IDS=$(gh api -X GET "/repos/${{ github.repository }}/releases" | jq -r ".[] | select(.tag_name==\"$tag\") | .id")
+            RELEASE_IDS=$(gh api -X GET "/repos/$GITHUB_REPOSITORY/releases" | jq -r ".[] | select(.tag_name==\"$tag\") | .id")
 
             for id in $RELEASE_IDS; do
               echo "[INFO] Deleting release ID: $id for tag $tag"
-              gh api -X DELETE "/repos/${{ github.repository }}/releases/$id"
+              gh api -X DELETE "/repos/$GITHUB_REPOSITORY/releases/$id"
             done
 
             # Delete the tag locally and remotely
@@ -255,7 +265,7 @@ jobs:
 
   github_release:
     name: Publish GitHub release
-    needs: [gather_details, commit_version_bump, delete_old_betas]
+    needs: [gather_details, delete_old_betas]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -275,9 +285,12 @@ jobs:
         id: create_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IS_BETA: ${{ needs.gather_details.outputs.is_beta }}
+          TAG_NAME: ${{ needs.gather_details.outputs.tag_name }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
-          if [ "${{ needs.gather_details.outputs.is_beta }}" = "true" ]; then
-              gh release create ${{ needs.gather_details.outputs.tag_name }} dist/* --title ${{ needs.gather_details.outputs.tag_name }} --prerelease --target ${{ needs.commit_version_bump.outputs.commit_sha }}
+          if [ "$IS_BETA" = "true" ]; then
+              gh release create "$TAG_NAME" dist/* --title "$TAG_NAME" --prerelease --target "$TARGET_SHA"
           else
-              gh release create ${{ needs.gather_details.outputs.tag_name }} dist/* --title ${{ needs.gather_details.outputs.tag_name }} --generate-notes --target ${{ needs.commit_version_bump.outputs.commit_sha }}
+              gh release create "$TAG_NAME" dist/* --title "$TAG_NAME" --generate-notes --target "$TARGET_SHA"
           fi

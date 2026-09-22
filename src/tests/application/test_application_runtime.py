@@ -395,12 +395,14 @@ def test_get_platform_providers_returns_macos_providers() -> None:
 
 
 def test_get_platform_providers_rejects_unsupported_platform() -> None:
-    with patch(
-        "powerrules.application.runtime.platform.system",
-        return_value="FreeBSD",
-    ):
-        with pytest.raises(
+    with (
+        patch(
+            "powerrules.application.runtime.platform.system",
+            return_value="FreeBSD",
+        ),
+        pytest.raises(
             RuntimeError,
             match="Unsupported operating system: FreeBSD",
-        ):
-            get_platform_providers()
+        ),
+    ):
+        get_platform_providers()

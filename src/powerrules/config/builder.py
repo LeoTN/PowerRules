@@ -1,3 +1,5 @@
+from datetime import datetime, time
+
 from powerrules.actions.base import Action
 from powerrules.actions.power import (
     HibernateAction,
@@ -6,17 +8,20 @@ from powerrules.actions.power import (
     SleepAction,
 )
 from powerrules.conditions.base import Condition
-from powerrules.conditions.datetime import DateTimeCondition, TimeRange
+from powerrules.conditions.datetime import DateTimeCondition, DateTimeRange, TimeRange
 from powerrules.conditions.operators import AndCondition, NotCondition, OrCondition
 from powerrules.conditions.process import ProcessCondition
 from powerrules.conditions.window import WindowCondition
 from powerrules.config.models import (
     ActionConfiguration,
     ConditionConfiguration,
+    DateRangeConfiguration,
     DateTimeConditionConfiguration,
+    DateTimeRangeConfiguration,
     ProcessConditionConfiguration,
     RuleConfiguration,
     RuleSetConfiguration,
+    TimeRangeConfiguration,
     WindowConditionConfiguration,
 )
 from powerrules.engine.exceptions import ConfigurationError
@@ -144,28 +149,49 @@ class ConfigurationBuilder:
     ) -> DateTimeCondition:
         """Build a datetime condition from its configuration.
 
+        A date range is converted to a datetime range, which starts at the
+        beginning of the start day and ends at the beginning of the end day (the start is inclusive and the end is exclusive).
+
+        Example: A date range of 2026-08-21 to 2026-08-22 is converted to a datetime range of 2026-08-21 00:00:00 to 2026-08-22 00:00:00.
+
         Args:
             configuration: DateTime condition configuration.
 
         Returns:
             The executable datetime condition.
         """
-        if configuration.between is not None:
-            return DateTimeCondition(
-                clock_provider=self.clock_provider,
-                time_range=TimeRange(
-                    start=configuration.between.start,
-                    end=configuration.between.end,
-                ),
-            )
+        time_range: TimeRange | None = None
+        datetime_range: DateTimeRange | None = None
 
-        if configuration.weekday is not None:
-            return DateTimeCondition(
-                clock_provider=self.clock_provider,
-                weekdays=frozenset(configuration.weekday),
-            )
+        # The correct configuration model is used depending on the detected type (date, time or datetime range)
+        match configuration.between:
+            # The date range is converted to a date time range
+            case DateRangeConfiguration(start=start, end=end):
+                datetime_range = DateTimeRange(
+                    start=datetime.combine(start, time.min),
+                    end=datetime.combine(end, time.min),
+                )
+            case TimeRangeConfiguration(start=start, end=end):
+                time_range = TimeRange(start=start, end=end)
+            case DateTimeRangeConfiguration(start=start, end=end):
+                datetime_range = DateTimeRange(start=start, end=end)
 
-        raise RuntimeError("Invalid datetime condition configuration")
+        weekdays = (
+            frozenset(configuration.weekday)
+            if configuration.weekday is not None
+            else None
+        )
+        months = (
+            frozenset(configuration.month) if configuration.month is not None else None
+        )
+
+        return DateTimeCondition(
+            clock_provider=self.clock_provider,
+            time_range=time_range,
+            datetime_range=datetime_range,
+            weekdays=weekdays,
+            months=months,
+        )
 
     def _build_window_condition(
         self, configuration: WindowConditionConfiguration
