@@ -107,10 +107,12 @@ jobs:
                       # Only evaluate the subject of the commit that triggered the workflow
                       commit_subject = commit_lines[0].strip()
 
-                      if re.fullmatch(r"fix(?:\([^)]+\))?:\s+.+", commit_subject):
+                      if re.fullmatch(r"(?:fix|hotfix)[:/]\s+.+", commit_subject):
                           return "PATCH"
 
-                      if re.fullmatch(r"feat(?:\([^)]+\))?:\s+.+", commit_subject):
+                      if re.fullmatch(
+                          r"(?:feat|feature|improvement|enhancement)[:/]\s+.+", commit_subject
+                      ):
                           return "MINOR"
 
                       return None
@@ -173,7 +175,9 @@ jobs:
 
                       if release_type is None:
                           print(
-                              "[INFO] Commit message does not define a release type (fix: -> PATCH, feat: -> MINOR)"
+                              "[INFO] Commit message does not define a release type. Use one of the following prefixes:\n\n"
+                              "       PATCH: fix|hotfix[:/]\n"
+                              "       MINOR: feat|feature|improvement|enhancement[:/]\n\n"
                           )
                           print("[INFO] No beta release will be created")
 
