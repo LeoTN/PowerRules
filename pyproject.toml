@@ -14,19 +14,19 @@ authors = [
     { name = "LeoTN", email = "LeoTN.GitHub@gmx.net" }
 ]
 keywords = [
-    "shutdown",
-    "reboot",
-    "hibernate",
-    "sleep",
     "cli",
-    "windows",
+    "hibernate",
     "linux",
     "macos",
-    "rules",
-    "policy",
+    "management",
     "manager",
+    "policy",
     "power",
-    "management"
+    "reboot",
+    "rules",
+    "shutdown",
+    "sleep",
+    "windows"
 ]
 classifiers = [
     "Topic :: Utilities",
@@ -39,7 +39,7 @@ classifiers = [
 ]
 dependencies = [
     "pyyaml>=6.0,<7.0",
-    "pydantic>=2.0,<3.0",
+    "pydantic>=2.11,<3.0",
     "typer>=0.27.1,<0.28.0",
     "psutil>=7.0,<8.0",
     "pywinctl>=0.4.1,<0.5.0"
