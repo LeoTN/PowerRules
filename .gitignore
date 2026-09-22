@@ -1,4 +1,3 @@
 __pycache__/
 dist/
-poetry.lock
 powerrules.yaml
