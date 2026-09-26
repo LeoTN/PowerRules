@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable
 from functools import wraps
 from typing import Any, NoReturn, TypeVar
@@ -10,6 +11,8 @@ from powerrules.engine.exceptions import (
     ActionExecutionError,
     ConditionEvaluationError,
 )
+
+logger = logging.getLogger(__name__)
 
 EXIT_RUNTIME_ERROR = 1
 EXIT_POLICY_ERROR = 2
@@ -24,67 +27,44 @@ def handle_cli_error(error: Exception) -> NoReturn:
         error: Exception raised during command execution.
 
     Raises:
-        typer.Exit: Always raised after displaying the error.
+        typer.Exit: Always raised after logging the error.
     """
     # The policy file type is currently the only type being used in CLI commands
     if isinstance(error, FileNotFoundError):
-        typer.echo(
-            f"[ERROR] Policy file not found: {error.filename}",
-            err=True,
-        )
+        logger.error(f"Policy file not found: {error.filename}")
         raise typer.Exit(code=EXIT_POLICY_ERROR)
 
     if isinstance(error, yaml.YAMLError):
-        typer.echo(
-            "[ERROR] Failed to parse policy file",
-            err=True,
-        )
+        logger.error("Failed to parse policy file")
         raise typer.Exit(code=EXIT_POLICY_ERROR)
 
     if isinstance(error, ValidationError):
-        typer.echo(
-            "[ERROR] Policy validation failed",
-            err=True,
-        )
+        logger.error("Policy validation failed")
 
         # Output the cryptic Pydantic errors anyway. This should be reworked in the future for a nicer output
         for validation_error in error.errors():
             location = ".".join(str(item) for item in validation_error["loc"])
             message = validation_error["msg"]
 
-            typer.echo(
-                f"[ERROR] {location}: {message}",
-                err=True,
-            )
+            logger.error(f"{location}: {message}")
 
         raise typer.Exit(code=EXIT_POLICY_ERROR)
 
     # The existing error messages for conditions and actions
     if isinstance(error, ConditionEvaluationError):
-        typer.echo(
-            f"[ERROR] Failed to evaluate condition: {error}",
-            err=True,
-        )
+        logger.error(f"Failed to evaluate condition: {error}")
         raise typer.Exit(code=EXIT_RUNTIME_ERROR)
 
     if isinstance(error, ActionExecutionError):
-        typer.echo(
-            f"[ERROR] Failed to execute action: {error}",
-            err=True,
-        )
+        logger.error(f"Failed to execute action: {error}")
         raise typer.Exit(code=EXIT_RUNTIME_ERROR)
 
     if isinstance(error, ValueError):
-        typer.echo(
-            f"[ERROR] {error}",
-            err=True,
-        )
+        logger.error(str(error))
         raise typer.Exit(code=EXIT_RUNTIME_ERROR)
 
-    typer.echo(
-        f"[ERROR] Unexpected error: {error}",
-        err=True,
-    )
+    # Include a stack trace here since this is an unexpected, unclassified error
+    logger.error(f"Unexpected error: {error}", exc_info=True)  # noqa: LOG014
     raise typer.Exit(code=EXIT_RUNTIME_ERROR)
 
 

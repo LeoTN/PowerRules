@@ -59,7 +59,7 @@ rules:
     )
 
     assert result.exit_code == 0
-    assert "[INFO] Policy is valid" in result.stdout
+    assert f"Policy '{policy_file}' is valid" in result.stdout
 
 
 def test_cli_policy_validate_rejects_invalid_policy(tmp_path: Path) -> None:
@@ -138,7 +138,7 @@ def test_cli_policy_run_once_reports_matching_rule() -> None:
         )
 
     assert result.exit_code == 0
-    assert "[INFO] Rule 'Test rule' matched" in result.stdout
+    assert "Rule 'Test rule' matched" in result.stdout
     mock_runtime.return_value.run_once.assert_called_once_with(
         configuration_path=Path("powerrules.yaml"), dry_run=False
     )
@@ -156,7 +156,7 @@ def test_cli_policy_run_once_reports_no_match() -> None:
         )
 
     assert result.exit_code == 0
-    assert "[INFO] No rule matched" in result.stdout
+    assert "No rule matched" in result.stdout
     mock_runtime.return_value.run_once.assert_called_once_with(
         configuration_path=Path("powerrules.yaml"), dry_run=False
     )
@@ -188,7 +188,7 @@ rules: []
         )
 
     assert result.exit_code == 0
-    assert "[INFO] No rule matched" in result.stdout
+    assert "No rule matched" in result.stdout
     mock_runtime.return_value.run_once.assert_called_once_with(
         configuration_path=policy_file, dry_run=False
     )
@@ -206,7 +206,7 @@ def test_cli_policy_run_calls_run_once() -> None:
         )
 
     assert result.exit_code == 0
-    assert "[INFO] No rule matched" in result.stdout
+    assert "No rule matched" in result.stdout
     mock_runtime.return_value.run_once.assert_called_once_with(
         configuration_path=Path("powerrules.yaml"), dry_run=False
     )
@@ -319,7 +319,7 @@ def test_cli_policy_run_continuously_logs_triggered_match() -> None:
         )
 
     assert result.exit_code == 0
-    assert "[INFO] Rule 'Test rule' matched, executed action: shutdown" in result.stdout
+    assert "Rule 'Test rule' matched, executed action: shutdown" in result.stdout
 
 
 def test_cli_policy_run_continuously_logs_dry_run_match() -> None:
@@ -341,7 +341,7 @@ def test_cli_policy_run_continuously_logs_dry_run_match() -> None:
 
     assert result.exit_code == 0
     assert (
-        "[INFO] [DRY RUN] Rule 'Test rule' matched, would have executed action: shutdown"
+        "[DRY RUN] Rule 'Test rule' matched, would have executed action: shutdown"
         in result.stdout
     )
     mock_runtime.return_value.run_continuously.assert_called_once_with(
@@ -371,7 +371,7 @@ def test_cli_policy_run_continuously_logs_stopping_evaluation_on_stop_on_match()
         )
 
     assert result.exit_code == 0
-    assert "[INFO] Rule matched, stopping evaluation" in result.stdout
+    assert "Rule matched, stopping evaluation" in result.stdout
 
 
 def test_cli_policy_run_continuously_does_not_log_when_no_match() -> None:
