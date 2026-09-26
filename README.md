@@ -39,6 +39,7 @@ pip install powerrules
 rules:
   # Shut down when no backup process is running, a matching backup window is open, and the current time is between 23:00 and 01:30
   - name: "Shutdown after nightly backup"
+    enabled: true
     conditions:
       and:
         - process:
@@ -57,28 +58,10 @@ rules:
       type: shutdown
 ```
 
-**Validate the policy:**
+**Evaluate the policy once. Use `--dry-run` to see what would happen:**
 
 ```bash
-pwru policy validate
-```
-
-**Show configured rules:**
-
-```bash
-pwru policy show
-```
-
-**Evaluate the policy once in dry-run mode:**
-
-```bash
-pwru policy run --once --dry-run
-```
-
-Use a different policy file with `--policy` or `-p`:
-
-```bash
-pwru policy run --policy my-policy.yaml
+pwru policy run --once --policy my-policy.yaml
 ```
 
 ## Features
@@ -211,11 +194,13 @@ Shutdown, sleep, hibernate, or reboot your computer.
 
 ### Continuous Evaluation
 
-Evaluate rules at a set interval.
+Evaluate rules at a set interval. A matching rule is triggered only when it becomes the active match, avoiding repeated execution while the same rule remains matched.
 
 ```bash
 pwru policy run
 ```
+
+`--stop-on-match` can be used to stop the evaluation after the first match.
 
 ## Supported Platforms
 
