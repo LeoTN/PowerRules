@@ -280,3 +280,162 @@ def test_rule_engine_find_match_returns_first_matching_rule() -> None:
 
     assert matched_rule is first_rule
     assert second_rule.condition.evaluation_count == 0  # type: ignore (a "real" condition does not have this attribute, but the dummy condition does)
+
+
+##############################################
+# previous_matched_rule / action_triggered tests
+##############################################
+
+
+def test_rule_engine_evaluate_triggers_action_on_first_match() -> None:
+    condition = Dummy_Condition(given_result=True)
+    action = Dummy_Action()
+
+    rule = Rule(
+        name="Test rule",
+        condition=condition,
+        action=action,
+    )
+
+    result = RuleEngine((rule,)).evaluate()
+
+    assert result.matched_rule is rule
+    assert result.action_triggered is True
+    assert action.execution_count == 1
+
+
+def test_rule_engine_evaluate_does_not_retrigger_same_matched_rule() -> None:
+    condition = Dummy_Condition(given_result=True)
+    action = Dummy_Action()
+
+    rule = Rule(
+        name="Test rule",
+        condition=condition,
+        action=action,
+    )
+
+    engine = RuleEngine((rule,))
+
+    first_result = engine.evaluate()
+    second_result = engine.evaluate(previous_matched_rule=first_result.matched_rule)
+
+    assert second_result.matched_rule is rule
+    assert second_result.action_triggered is False
+    # The action was only executed once, not on the second (repeated) match
+    assert action.execution_count == 1
+
+
+def test_rule_engine_evaluate_retriggers_after_no_match_in_between() -> None:
+    condition = Dummy_Condition(given_result=True)
+    action = Dummy_Action()
+
+    rule = Rule(
+        name="Test rule",
+        condition=condition,
+        action=action,
+    )
+
+    engine = RuleEngine((rule,))
+
+    first_result = engine.evaluate()
+    # The rule no longer matches (e.g. condition changed), so there is no previous match
+    third_result = engine.evaluate(previous_matched_rule=None)
+
+    assert first_result.action_triggered is True
+    assert third_result.matched_rule is rule
+    assert third_result.action_triggered is True
+    # Triggered once on the first call and once again after the "no match" gap
+    assert action.execution_count == 2
+
+
+def test_rule_engine_evaluate_retriggers_when_matched_rule_changes() -> None:
+    first_action = Dummy_Action()
+    second_action = Dummy_Action()
+
+    first_rule = Rule(
+        name="First rule",
+        condition=Dummy_Condition(given_result=True),
+        action=first_action,
+    )
+    second_rule = Rule(
+        name="Second rule",
+        condition=Dummy_Condition(given_result=False),
+        action=second_action,
+    )
+
+    engine = RuleEngine((first_rule, second_rule))
+
+    first_result = engine.evaluate()
+
+    # Now the second rule matches instead of the first one
+    first_rule.condition.given_result = False  # type: ignore (Dummy_Condition has this attribute)
+    second_rule.condition.given_result = True  # type: ignore (Dummy_Condition has this attribute)
+
+    second_result = engine.evaluate(previous_matched_rule=first_result.matched_rule)
+
+    assert first_result.matched_rule is first_rule
+    assert second_result.matched_rule is second_rule
+    assert second_result.action_triggered is True
+    assert second_action.execution_count == 1
+
+
+def test_rule_engine_evaluate_does_not_trigger_action_for_no_match() -> None:
+    condition = Dummy_Condition(given_result=False)
+    action = Dummy_Action()
+
+    rule = Rule(
+        name="Test rule",
+        condition=condition,
+        action=action,
+    )
+
+    result = RuleEngine((rule,)).evaluate()
+
+    assert result.matched_rule is None
+    assert result.action_triggered is False
+    assert action.execution_count == 0
+
+
+######################
+# dry_run tests
+######################
+
+
+def test_rule_engine_evaluate_dry_run_reports_trigger_without_executing() -> None:
+    condition = Dummy_Condition(given_result=True)
+    action = Dummy_Action()
+
+    rule = Rule(
+        name="Test rule",
+        condition=condition,
+        action=action,
+    )
+
+    result = RuleEngine((rule,)).evaluate(dry_run=True)
+
+    assert result.matched_rule is rule
+    assert result.action_triggered is True
+    assert action.execution_count == 0
+
+
+def test_rule_engine_evaluate_dry_run_does_not_retrigger_same_matched_rule() -> None:
+    condition = Dummy_Condition(given_result=True)
+    action = Dummy_Action()
+
+    rule = Rule(
+        name="Test rule",
+        condition=condition,
+        action=action,
+    )
+
+    engine = RuleEngine((rule,))
+
+    first_result = engine.evaluate(dry_run=True)
+    second_result = engine.evaluate(
+        previous_matched_rule=first_result.matched_rule,
+        dry_run=True,
+    )
+
+    assert second_result.matched_rule is rule
+    assert second_result.action_triggered is False
+    assert action.execution_count == 0

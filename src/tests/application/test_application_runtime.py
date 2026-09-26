@@ -1,3 +1,4 @@
+import itertools
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -16,7 +17,7 @@ from powerrules.platform.macos.power import MacOSPowerProvider
 from powerrules.platform.process import PsUtilProcessProvider
 from powerrules.platform.window import PyWinCtlWindowProvider
 from powerrules.platform.windows.power import WindowsPowerProvider
-from tests.dummies import Dummy_Action, Dummy_Condition, Dummy_StopEvaluation
+from tests.dummies import Dummy_Action, Dummy_Condition
 
 #########################
 # PowerRulesRuntime tests
@@ -81,7 +82,7 @@ def test_runtime_run_once_evaluates_configuration(
         rule_set.rules,
     )
 
-    mock_engine.return_value.evaluate.assert_called_once_with()
+    mock_engine.return_value.evaluate.assert_called_once_with(dry_run=False)
 
 
 def test_runtime_run_once_propagates_condition_evaluation_error(
@@ -107,148 +108,160 @@ def test_runtime_run_once_propagates_condition_evaluation_error(
     assert exc_info.value is original_error
 
 
-def test_runtime_run_continuously_executes_matching_rule_once() -> None:
-    action = Dummy_Action()
+def test_runtime_run_continuously_threads_previous_matched_rule_between_evaluations() -> (
+    None
+):
     rule = Rule(
         name="Test rule",
         condition=Dummy_Condition(given_result=True),
-        action=action,
+        action=Dummy_Action(),
     )
 
     rule_engine = Mock()
-    rule_engine.find_match.side_effect = [
-        rule,
-        rule,
-        None,
-        rule,
+    rule_engine.evaluate.side_effect = [
+        RuleEvaluationResult(matched_rule=rule, action_triggered=True),
+        RuleEvaluationResult(matched_rule=rule, action_triggered=False),
+        RuleEvaluationResult(matched_rule=None, action_triggered=False),
+        RuleEvaluationResult(matched_rule=rule, action_triggered=True),
     ]
-
-    def stop_after_fourth_sleep(_: float) -> None:
-        if sleep.call_count == 4:
-            raise Dummy_StopEvaluation
-
-    sleep = Mock(side_effect=stop_after_fourth_sleep)
 
     with (
         patch(
             "powerrules.application.runtime.PowerRulesRuntime._build_rule_engine",
             return_value=rule_engine,
         ),
-        patch(
-            "powerrules.application.runtime.time.sleep",
-            new=sleep,
-        ),
-        pytest.raises(Dummy_StopEvaluation),
+        patch("powerrules.application.runtime.time.sleep") as sleep,
     ):
-        PowerRulesRuntime().run_continuously(
-            configuration_path=Path("powerrules.yaml"),
+        results = list(
+            itertools.islice(
+                PowerRulesRuntime().run_continuously(
+                    configuration_path=Path("powerrules.yaml"),
+                ),
+                4,
+            )
         )
 
-    assert action.execution_count == 2
-    assert rule_engine.find_match.call_count == 4
-    assert sleep.call_count == 4
+    assert [result.action_triggered for result in results] == [
+        True,
+        False,
+        False,
+        True,
+    ]
+    assert rule_engine.evaluate.call_count == 4
+    # Sleep happens between evaluations, so consuming 4 results sleeps 3 times
+    assert sleep.call_count == 3
+
+    expected_previous_matched_rules = [None, rule, rule, None]
+    actual_previous_matched_rules = [
+        call.kwargs["previous_matched_rule"]
+        for call in rule_engine.evaluate.call_args_list
+    ]
+    assert actual_previous_matched_rules == expected_previous_matched_rules
+    assert all(
+        call.kwargs["dry_run"] is False for call in rule_engine.evaluate.call_args_list
+    )
 
 
 def test_runtime_run_continuously_stops_after_match_when_enabled() -> None:
-    action = Dummy_Action()
     rule = Rule(
         name="Test rule",
         condition=Dummy_Condition(given_result=True),
-        action=action,
+        action=Dummy_Action(),
     )
 
     rule_engine = Mock()
-    rule_engine.find_match.return_value = rule
-
-    sleep = Mock()
+    rule_engine.evaluate.return_value = RuleEvaluationResult(
+        matched_rule=rule, action_triggered=True
+    )
 
     with (
         patch(
             "powerrules.application.runtime.PowerRulesRuntime._build_rule_engine",
             return_value=rule_engine,
         ),
-        patch(
-            "powerrules.application.runtime.time.sleep",
-            new=sleep,
-        ),
+        patch("powerrules.application.runtime.time.sleep") as sleep,
     ):
-        PowerRulesRuntime().run_continuously(
-            configuration_path=Path("powerrules.yaml"),
-            stop_on_match=True,
+        results = list(
+            PowerRulesRuntime().run_continuously(
+                configuration_path=Path("powerrules.yaml"),
+                stop_on_match=True,
+            )
         )
 
-    assert action.execution_count == 1
-    assert rule_engine.find_match.call_count == 1
+    assert len(results) == 1
+    rule_engine.evaluate.assert_called_once_with(
+        previous_matched_rule=None,
+        dry_run=False,
+    )
     sleep.assert_not_called()
 
 
 def test_runtime_run_continuously_does_not_stop_after_match_when_disabled() -> None:
-    action = Dummy_Action()
     rule = Rule(
         name="Test rule",
         condition=Dummy_Condition(given_result=True),
-        action=action,
+        action=Dummy_Action(),
     )
 
     rule_engine = Mock()
-    rule_engine.find_match.side_effect = [
-        rule,
-        None,
-        rule,
+    rule_engine.evaluate.side_effect = [
+        RuleEvaluationResult(matched_rule=rule, action_triggered=True),
+        RuleEvaluationResult(matched_rule=None, action_triggered=False),
+        RuleEvaluationResult(matched_rule=rule, action_triggered=True),
     ]
-
-    def stop_after_third_sleep(_: float) -> None:
-        if sleep.call_count == 3:
-            raise Dummy_StopEvaluation
-
-    sleep = Mock(side_effect=stop_after_third_sleep)
 
     with (
         patch(
             "powerrules.application.runtime.PowerRulesRuntime._build_rule_engine",
             return_value=rule_engine,
         ),
-        patch(
-            "powerrules.application.runtime.time.sleep",
-            new=sleep,
-        ),
-        pytest.raises(Dummy_StopEvaluation),
+        patch("powerrules.application.runtime.time.sleep") as sleep,
     ):
-        PowerRulesRuntime().run_continuously(
-            configuration_path=Path("powerrules.yaml"),
-            stop_on_match=False,
+        results = list(
+            itertools.islice(
+                PowerRulesRuntime().run_continuously(
+                    configuration_path=Path("powerrules.yaml"),
+                    stop_on_match=False,
+                ),
+                3,
+            )
         )
 
-    assert action.execution_count == 2
-    assert rule_engine.find_match.call_count == 3
-    assert sleep.call_count == 3
+    assert len(results) == 3
+    assert rule_engine.evaluate.call_count == 3
+    assert sleep.call_count == 2
+
+    expected_previous_matched_rules = [None, rule, None]
+    actual_previous_matched_rules = [
+        call.kwargs["previous_matched_rule"]
+        for call in rule_engine.evaluate.call_args_list
+    ]
+    assert actual_previous_matched_rules == expected_previous_matched_rules
 
 
 def test_runtime_run_continuously_uses_configured_evaluation_interval() -> None:
     rule_engine = Mock()
-    rule_engine.find_match.return_value = None
-
-    def stop_after_first_sleep(_: float) -> None:
-        raise Dummy_StopEvaluation
-
-    sleep = Mock(side_effect=stop_after_first_sleep)
+    rule_engine.evaluate.return_value = RuleEvaluationResult(matched_rule=None)
 
     with (
         patch(
             "powerrules.application.runtime.PowerRulesRuntime._build_rule_engine",
             return_value=rule_engine,
         ),
-        patch(
-            "powerrules.application.runtime.time.sleep",
-            new=sleep,
-        ),
-        pytest.raises(Dummy_StopEvaluation),
+        patch("powerrules.application.runtime.time.sleep") as sleep,
     ):
-        PowerRulesRuntime().run_continuously(
-            configuration_path=Path("powerrules.yaml"),
-            evaluation_interval=30.0,
+        # Consuming two evaluations means the generator sleeps exactly once in between
+        results = list(
+            itertools.islice(
+                PowerRulesRuntime().run_continuously(
+                    configuration_path=Path("powerrules.yaml"),
+                    evaluation_interval=30.0,
+                ),
+                2,
+            )
         )
 
+    assert len(results) == 2
     sleep.assert_called_once_with(30.0)
 
 
@@ -256,6 +269,7 @@ def test_runtime_run_continuously_uses_configured_evaluation_interval() -> None:
 def test_runtime_run_continuously_rejects_invalid_evaluation_interval(
     evaluation_interval: float,
 ) -> None:
+    # The interval is validated eagerly, before any evaluation or iteration takes place
     with pytest.raises(
         ValueError,
         match="Evaluation interval must be greater than zero",
@@ -268,12 +282,8 @@ def test_runtime_run_continuously_rejects_invalid_evaluation_interval(
 
 def test_runtime_run_continuously_builds_rule_engine_only_once() -> None:
     rule_engine = Mock()
-    rule_engine.find_match.return_value = None
+    rule_engine.evaluate.return_value = RuleEvaluationResult(matched_rule=None)
 
-    def stop_after_first_sleep(_: float) -> None:
-        raise Dummy_StopEvaluation
-
-    sleep = Mock(side_effect=stop_after_first_sleep)
     build_rule_engine = Mock(return_value=rule_engine)
 
     with (
@@ -281,16 +291,19 @@ def test_runtime_run_continuously_builds_rule_engine_only_once() -> None:
             "powerrules.application.runtime.PowerRulesRuntime._build_rule_engine",
             new=build_rule_engine,
         ),
-        patch(
-            "powerrules.application.runtime.time.sleep",
-            new=sleep,
-        ),
-        pytest.raises(Dummy_StopEvaluation),
+        patch("powerrules.application.runtime.time.sleep"),
     ):
-        PowerRulesRuntime().run_continuously(
-            configuration_path=Path("powerrules.yaml"),
+        # Consume several evaluations to make sure the rule engine is still only built once
+        results = list(
+            itertools.islice(
+                PowerRulesRuntime().run_continuously(
+                    configuration_path=Path("powerrules.yaml"),
+                ),
+                3,
+            )
         )
 
+    assert len(results) == 3
     build_rule_engine.assert_called_once_with(Path("powerrules.yaml"))
 
 
