@@ -69,10 +69,10 @@ pwru policy validate
 pwru policy show
 ```
 
-**Evaluate the policy once:**
+**Evaluate the policy once in dry-run mode:**
 
 ```bash
-pwru policy run --once
+pwru policy run --once --dry-run
 ```
 
 Use a different policy file with `--policy` or `-p`:

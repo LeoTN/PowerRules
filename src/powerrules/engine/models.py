@@ -26,3 +26,5 @@ class RuleEvaluationResult:
     """Represent the result of evaluating the rule set."""
 
     matched_rule: Rule | None
+    # True when a rule matched and it was not the previous_matched_rule
+    action_triggered: bool = False

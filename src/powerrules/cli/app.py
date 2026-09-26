@@ -4,7 +4,7 @@ from typing import Annotated
 
 import typer
 
-from powerrules.application.runtime import PowerRulesRuntime
+from powerrules.application.runtime import PowerRulesRuntime, describe_action
 from powerrules.cli.errors import cli_command
 from powerrules.config.loader import ConfigurationLoader
 
@@ -94,6 +94,11 @@ def run(
         "--stop-on-match",
         help="Stop the continuous evaluation after the first rule match.",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Evaluate the policy without executing any matching action.",
+    ),
     policy: PolicyOption = DEFAULT_POLICY_PATH,
 ) -> None:
     """Evaluate a PowerRules policy continuously or once."""
@@ -101,14 +106,43 @@ def run(
 
     if once:
         typer.echo(f"[INFO] Running policy '{policy}' once...")
-        result = runtime.run_once(configuration_path=policy)
+        result = runtime.run_once(configuration_path=policy, dry_run=dry_run)
 
         if result.matched_rule is None:
             typer.echo("[INFO] No rule matched")
+        elif dry_run:
+            typer.echo(
+                f"[INFO] [DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed action: {describe_action(result.matched_rule.action)}"
+            )
+        # Technically, the system could already be shut down at this point, but this usually takes a few seconds
         else:
-            typer.echo(f"[INFO] Rule '{result.matched_rule.name}' matched")
+            typer.echo(
+                f"[INFO] Rule '{result.matched_rule.name}' matched, executed action: {describe_action(result.matched_rule.action)}"
+            )
 
         return
 
     typer.echo(f"[INFO] Running policy '{policy}' continuously...")
-    runtime.run_continuously(configuration_path=policy, stop_on_match=stop_on_match)
+
+    for result in runtime.run_continuously(
+        configuration_path=policy,
+        stop_on_match=stop_on_match,
+        dry_run=dry_run,
+    ):
+        if not result.action_triggered:
+            continue
+
+        assert result.matched_rule is not None  # action_triggered implies a match
+
+        if dry_run:
+            typer.echo(
+                f"[INFO] [DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed action: {describe_action(result.matched_rule.action)}"
+            )
+        # Technically, the system could already be shut down at this point, but this usually takes a few seconds
+        else:
+            typer.echo(
+                f"[INFO] Rule '{result.matched_rule.name}' matched, executed action: {describe_action(result.matched_rule.action)}"
+            )
+
+        if stop_on_match:
+            typer.echo("[INFO] Rule matched, stopping evaluation")
