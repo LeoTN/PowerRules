@@ -59,7 +59,7 @@ pwru = "powerrules.cli.app:app"
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0,<9.0",
+    "pytest>=9.0,<10.0",
     "ruff>=0.16.4,<0.17.0"
 ]
 
