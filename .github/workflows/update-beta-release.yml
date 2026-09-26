@@ -107,11 +107,11 @@ jobs:
                       # Only evaluate the subject of the commit that triggered the workflow
                       commit_subject = commit_lines[0].strip()
 
-                      if re.fullmatch(r"(?:fix|hotfix)[:/]\s+.+", commit_subject):
+                      if re.fullmatch(r"(?:fix|hotfix)[:/]\s*.+", commit_subject):
                           return "PATCH"
 
                       if re.fullmatch(
-                          r"(?:feat|feature|improvement|enhancement)[:/]\s+.+", commit_subject
+                          r"(?:feat|feature|improvement|enhancement)[:/]\s*.+", commit_subject
                       ):
                           return "MINOR"
 
