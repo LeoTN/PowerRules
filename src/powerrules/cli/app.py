@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 
-from powerrules.application.logging import LogLevel, configure_logging
+from powerrules.application.logging import LogLevel, configure_logging, console
 from powerrules.application.runtime import PowerRulesRuntime, describe_action
 from powerrules.cli.errors import cli_command
 from powerrules.config.loader import ConfigurationLoader
@@ -71,7 +72,10 @@ app.add_typer(policy_app, name="policy")
 def version_callback(value: bool) -> None:
     """Display the installed PowerRules version."""
     if value:
-        typer.echo(f"PowerRules {version('powerrules')}")
+        # The number is highlighted incorrectly and markup is disabled because it's not needed
+        console.print(
+            f"PowerRules {version('powerrules')}", markup=False, highlight=False
+        )
         raise typer.Exit()
 
 
@@ -104,7 +108,8 @@ def validate(
     """Validate a PowerRules policy file."""
     ConfigurationLoader().load(policy)
 
-    typer.echo(f"Policy '{policy}' is valid")
+    # Theoretically, one could inject markdown via the file path
+    console.print(f"Policy '{policy}' is valid", markup=False)
 
 
 @policy_app.command("show")
@@ -116,8 +121,13 @@ def show(
     policy_configuration = ConfigurationLoader().load(policy)
 
     for index, rule in enumerate(policy_configuration.rules, start=1):
-        status = "enabled" if rule.enabled else "disabled"
-        typer.echo(f"{index}. {rule.name} [{status}]")
+        # Show enabled or disabled status with colors
+        status_style = "green" if rule.enabled else "red"
+        status_text = "enabled" if rule.enabled else "disabled"
+        # Escape the rule name because it might contain markup
+        console.print(
+            f"{index}. {escape(rule.name)} [{status_style}]\\[{status_text}][/{status_style}]"
+        )
 
 
 @policy_app.command("run")
