@@ -98,11 +98,6 @@ class Dummy_Process:
         }
 
 
-# Dummy exception used to terminate the continously running evaluation loop
-class Dummy_StopEvaluation(Exception):
-    pass
-
-
 # Dummy model used to call the validation function
 class Dummy_Model(BaseModel):
     enabled: bool

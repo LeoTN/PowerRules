@@ -1,4 +1,6 @@
-import typer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class PyWinCtlWindowProvider:
@@ -16,9 +18,8 @@ class PyWinCtlWindowProvider:
 
         # This exception is common on headless systems (e.g. Ubuntu Server)
         except Exception:  # noqa: BLE001 (no need to handle the exception)
-            typer.echo(
-                "[WARNING] Failed to load window provider. Window conditions will not be available",
-                err=True,
+            logger.warning(
+                "Failed to load window provider. Window conditions will not be available"
             )
 
     def get_window_titles(self) -> tuple[str, ...]:

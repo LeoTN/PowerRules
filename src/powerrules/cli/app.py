@@ -1,14 +1,21 @@
+import logging
 from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 
-from powerrules.application.runtime import PowerRulesRuntime
+from powerrules.application.logging import LogLevel, configure_logging, console
+from powerrules.application.runtime import PowerRulesRuntime, describe_action
 from powerrules.cli.errors import cli_command
 from powerrules.config.loader import ConfigurationLoader
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_POLICY_PATH = Path("powerrules.yaml")
+DEFAULT_LOG_LEVEL = LogLevel.INFO
+DEFAULT_LOG_FILE_PATH = Path("powerrules.log")
 
 # The policy option is shared by all commands which work with a policy file
 PolicyOption = Annotated[
@@ -17,6 +24,31 @@ PolicyOption = Annotated[
         "--policy",
         "-p",
         help="Path to the PowerRules policy file.",
+    ),
+]
+
+# Logging options are defined on the root command, so they apply to every subcommand
+LogLevelOption = Annotated[
+    LogLevel,
+    typer.Option(
+        "--log-level",
+        help="Minimum log level shown on the console and written to the log file.",
+    ),
+]
+
+LogFileOption = Annotated[
+    Path,
+    typer.Option(
+        "--log-file",
+        help="Path to the rotating log file.",
+    ),
+]
+
+LogLevelFileOption = Annotated[
+    LogLevel | None,
+    typer.Option(
+        "--log-level-file",
+        help="Minimum log level written to the log file. Defaults to --log-level if not set.",
     ),
 ]
 
@@ -40,7 +72,10 @@ app.add_typer(policy_app, name="policy")
 def version_callback(value: bool) -> None:
     """Display the installed PowerRules version."""
     if value:
-        typer.echo(f"PowerRules {version('powerrules')}")
+        # The number is highlighted incorrectly and markup is disabled because it's not needed
+        console.print(
+            f"PowerRules {version('powerrules')}", markup=False, highlight=False
+        )
         raise typer.Exit()
 
 
@@ -53,8 +88,16 @@ def main(
         callback=version_callback,
         is_eager=True,
     ),
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
+    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
+    log_level_file: LogLevelFileOption = None,
 ) -> None:
     """A rule-based computer power state management tool."""
+    configure_logging(
+        console_level=log_level,
+        log_file=log_file,
+        file_level=log_level_file,
+    )
 
 
 @policy_app.command("validate")
@@ -65,7 +108,8 @@ def validate(
     """Validate a PowerRules policy file."""
     ConfigurationLoader().load(policy)
 
-    typer.echo("[INFO] Policy is valid")
+    # Theoretically, one could inject markdown via the file path
+    console.print(f"Policy '{policy}' is valid", markup=False)
 
 
 @policy_app.command("show")
@@ -77,8 +121,13 @@ def show(
     policy_configuration = ConfigurationLoader().load(policy)
 
     for index, rule in enumerate(policy_configuration.rules, start=1):
-        status = "enabled" if rule.enabled else "disabled"
-        typer.echo(f"{index}. {rule.name} [{status}]")
+        # Show enabled or disabled status with colors
+        status_style = "green" if rule.enabled else "red"
+        status_text = "enabled" if rule.enabled else "disabled"
+        # Escape the rule name because it might contain markup
+        console.print(
+            f"{index}. {escape(rule.name)} [{status_style}]\\[{status_text}][/{status_style}]"
+        )
 
 
 @policy_app.command("run")
@@ -94,21 +143,55 @@ def run(
         "--stop-on-match",
         help="Stop the continuous evaluation after the first rule match.",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Evaluate the policy without executing any matching action.",
+    ),
     policy: PolicyOption = DEFAULT_POLICY_PATH,
 ) -> None:
     """Evaluate a PowerRules policy continuously or once."""
     runtime = PowerRulesRuntime()
 
     if once:
-        typer.echo(f"[INFO] Running policy '{policy}' once...")
-        result = runtime.run_once(configuration_path=policy)
+        logger.info(f"Running policy '{policy}' once...")
+        result = runtime.run_once(configuration_path=policy, dry_run=dry_run)
 
         if result.matched_rule is None:
-            typer.echo("[INFO] No rule matched")
+            logger.info("No rule matched")
+        elif dry_run:
+            logger.info(
+                f"[DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed action: {describe_action(result.matched_rule.action)}"
+            )
+        # Technically, the system could already be shut down at this point, but this usually takes a few seconds
         else:
-            typer.echo(f"[INFO] Rule '{result.matched_rule.name}' matched")
+            logger.info(
+                f"Rule '{result.matched_rule.name}' matched, executed action: {describe_action(result.matched_rule.action)}"
+            )
 
         return
 
-    typer.echo(f"[INFO] Running policy '{policy}' continuously...")
-    runtime.run_continuously(configuration_path=policy, stop_on_match=stop_on_match)
+    logger.info(f"Running policy '{policy}' continuously...")
+
+    for result in runtime.run_continuously(
+        configuration_path=policy,
+        stop_on_match=stop_on_match,
+        dry_run=dry_run,
+    ):
+        if not result.action_triggered:
+            continue
+
+        assert result.matched_rule is not None  # action_triggered implies a match
+
+        if dry_run:
+            logger.info(
+                f"[DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed action: {describe_action(result.matched_rule.action)}"
+            )
+        # Technically, the system could already be shut down at this point, but this usually takes a few seconds
+        else:
+            logger.info(
+                f"Rule '{result.matched_rule.name}' matched, executed action: {describe_action(result.matched_rule.action)}"
+            )
+
+        if stop_on_match:
+            logger.info("Rule matched, stopping evaluation")
