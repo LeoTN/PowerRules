@@ -1,7 +1,6 @@
 """Central logging configuration for PowerRules."""
 
 import logging
-import sys
 from enum import StrEnum
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -19,6 +18,12 @@ _LOG_FILE_BACKUP_COUNT = 5
 
 # The log file stays plain text, without rich formatting
 _FILE_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+# Shared Rich consoles, used both by the logging handlers below and for direct command output (e.g. "--version", "policy show").
+# "file" is intentionally left unset so each console resolves the current sys.stdout/sys.stderr dynamically on every write
+# instead of binding to a fixed stream captured at import/construction time
+console = Console(width=200)
+error_console = Console(stderr=True, width=200)
 
 
 class LogLevel(StrEnum):
@@ -67,7 +72,7 @@ def configure_logging(
 def _build_stdout_handler(console_level_number: int) -> logging.Handler:
     """Build the rich-formatted handler which writes messages below "WARNING" to stdout."""
     handler = RichHandler(
-        console=Console(file=sys.stdout, width=200),
+        console=console,
         level=console_level_number,
         show_time=False,
         show_path=False,
@@ -82,7 +87,7 @@ def _build_stdout_handler(console_level_number: int) -> logging.Handler:
 def _build_stderr_handler(console_level_number: int) -> logging.Handler:
     """Build the rich-formatted handler which writes "WARNING" and above to stderr."""
     return RichHandler(
-        console=Console(file=sys.stderr, width=200),
+        console=error_console,
         level=max(console_level_number, logging.WARNING),
         show_time=False,
         show_path=False,
