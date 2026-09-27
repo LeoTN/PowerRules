@@ -61,7 +61,7 @@ rules:
 **Evaluate the policy once. Use `--dry-run` to see what would happen:**
 
 ```bash
-pwru policy run --once --policy my-policy.yaml
+pwru policy run --once --policy my-policy.yaml --dry-run
 ```
 
 ## Features
