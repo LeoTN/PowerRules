@@ -2,3 +2,9 @@ __pycache__/
 dist/
 powerrules.yaml
 powerrules.log*
+
+# Nuitka artifacts
+*.build/
+*.dist/
+*.onefile-build/
+nuitka-crash-report.xml
