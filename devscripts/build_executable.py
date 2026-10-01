@@ -44,9 +44,16 @@ def get_arch_name() -> str:
     """Return the normalized architecture name used in PowerRules artifact names.
 
     Returns:
-        The machine architecture (e.g. "x86_64", "arm64").
+        The normalized machine architecture (e.g. "x86_64", "arm64").
     """
-    return platform.machine().lower()
+    architecture = platform.machine().lower()
+
+    architecture_aliases = {
+        "amd64": "x86_64",
+        "x86_64": "x86_64",
+    }
+
+    return architecture_aliases.get(architecture, architecture)
 
 
 def build_windows_file_version(package_version: str) -> str:
@@ -106,8 +113,8 @@ def build_nuitka_command(output_dir: Path, output_filename: str) -> list[str]:
             # Fails the build if the runtime DLLs are not present instead of silently omitting them
             "--include-windows-runtime-dlls=yes",
             f"--windows-file-version={windows_file_version}",
-            # Strings are allowed here
-            f"--windows-product-version={package_version}",
+            # Windows does allow custom strings as product version, but nuitka denies them. It is what it is
+            f"--windows-product-version={windows_file_version}",
             "--file-description=A rule-based computer power state management tool",
             "--copyright=https://github.com/LeoTN/PowerRules/blob/main/LICENSE",
             "--company-name=https://github.com/LeoTN/PowerRules",
