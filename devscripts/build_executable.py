@@ -1,7 +1,7 @@
 """Build a standalone PowerRules executable for the current platform using Nuitka.
 
 Usage:
-    poetry run python devscripts/build_executable.py [--output-dir DIR]
+    poetry run python devscripts/build_executable.py [--output-dir DIR] [--expected-version VERSION]
 """
 
 import argparse
@@ -114,6 +114,14 @@ def build_nuitka_command(output_dir: Path, output_filename: str) -> list[str]:
             "--product-name=PowerRules",
         ]
 
+    if get_os_name() == "macos":
+        command += [
+            # pywinctl pulls in PyObjC (Foundation), which Nuitka only supports in app bundles (--mode=app)
+            # A single-file binary is built instead, so the window provider reports itself as unavailable at runtime
+            # One could fix this in the future by using a different window provider than pywinctl
+            "--nofollow-import-to=pywinctl",
+        ]
+
     command.append(str(ENTRY_POINT))
 
     return command
@@ -127,6 +135,10 @@ def main() -> None:
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
         help=f"Directory the executable is written to (default: {DEFAULT_OUTPUT_DIR}).",
+    )
+    parser.add_argument(
+        "--expected-version",
+        help="Fail if the built executable reports a different version (e.g. 1.2.3 != 1.2.3b4).",
     )
     arguments = parser.parse_args()
 
@@ -163,6 +175,16 @@ def main() -> None:
             f"[ERROR] Binary verification failed due to unexpected --version output: {version_output}"
         )
         sys.exit(1)
+
+    # Catches a binary which was built with the wrong version (e.g. the 0.0.0 placeholder)
+    if arguments.expected_version is not None:
+        expected_output = f"PowerRules {arguments.expected_version}"
+
+        if version_output != expected_output:
+            print(
+                f"[ERROR] Binary verification failed due to unexpected version: expected '{expected_output}', got '{version_output}'"
+            )
+            sys.exit(1)
 
     print(f"[INFO] Binary verification successful: {version_output}")
 

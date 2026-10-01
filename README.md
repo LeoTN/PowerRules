@@ -210,7 +210,7 @@ pwru policy run
 | Linux | ✅ |
 | macOS* | ✅ |
 
-\* Hibernation is not supported on macOS.
+\* Hibernation is not supported on macOS. Window conditions are unavailable for the prebuilt executable.
 
 ## Credits & License
 

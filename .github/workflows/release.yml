@@ -179,13 +179,20 @@ jobs:
           cache: "poetry"
 
       - name: Install dependencies
+        # Only install the dependencies, but not PowerRules itself
         run: |
-          poetry sync
-          poetry install --no-interaction
+          poetry sync --no-root
+
+      # Install the package non-editable, so the version comes from the build backend (POETRY_DYNAMIC_VERSIONING_BYPASS) and Nuitka finds the package files in the distribution
+      - name: Install package non-editable
+        run: |
+          poetry run pip install --no-deps .
 
       - name: Build executable
+        env:
+          EXPECTED_VERSION: ${{ needs.gather_details.outputs.new_version }}
         run: |
-          poetry run python devscripts/build_executable.py --output-dir dist/executable
+          poetry run python devscripts/build_executable.py --output-dir dist/executable --expected-version "$EXPECTED_VERSION"
 
       - name: Upload executable artifact
         uses: actions/upload-artifact@v7
@@ -219,9 +226,9 @@ jobs:
           cache: "poetry"
 
       - name: Install dependencies
+        # Only install the dependencies, but not PowerRules itself
         run: |
-          poetry sync
-          poetry install --no-interaction
+          poetry sync --no-root
 
       - name: Build source and wheel distribution
         run: |
