@@ -17,10 +17,12 @@ from powerrules.engine.models import Rule, RuleEvaluationResult
 from powerrules.engine.rule_engine import RuleEngine
 from powerrules.platform.clock import SystemClockProvider
 from powerrules.platform.linux.power import LinuxPowerProvider
+from powerrules.platform.linux.window import LinuxWindowProvider
 from powerrules.platform.macos.power import MacOSPowerProvider
+from powerrules.platform.macos.window import MacOSWindowProvider
 from powerrules.platform.process import PsUtilProcessProvider
-from powerrules.platform.window import PyWinCtlWindowProvider
 from powerrules.platform.windows.power import WindowsPowerProvider
+from powerrules.platform.windows.window import WindowsWindowProvider
 from powerrules.providers.clock import ClockProvider
 from powerrules.providers.power import PowerProvider
 from powerrules.providers.process import ProcessProvider
@@ -211,7 +213,7 @@ def get_platform_providers() -> PlatformProviders:
         return PlatformProviders(
             clock=SystemClockProvider(),
             process=PsUtilProcessProvider(),
-            window=PyWinCtlWindowProvider(),
+            window=WindowsWindowProvider(),
             power=WindowsPowerProvider(),
         )
 
@@ -219,7 +221,7 @@ def get_platform_providers() -> PlatformProviders:
         return PlatformProviders(
             clock=SystemClockProvider(),
             process=PsUtilProcessProvider(),
-            window=PyWinCtlWindowProvider(),
+            window=LinuxWindowProvider(),
             power=LinuxPowerProvider(),
         )
 
@@ -228,7 +230,7 @@ def get_platform_providers() -> PlatformProviders:
         return PlatformProviders(
             clock=SystemClockProvider(),
             process=PsUtilProcessProvider(),
-            window=PyWinCtlWindowProvider(),
+            window=MacOSWindowProvider(),
             power=MacOSPowerProvider(),
         )
 

@@ -275,10 +275,6 @@ MACOS_NOFOLLOW_IMPORT_TO = (
     "psutil._pslinux",
     "psutil._pssunos",
     "psutil._pswindows",
-    # pywinctl pulls in PyObjC (Foundation), which Nuitka only supports in app bundles (--mode=app)
-    # A single-file binary is built instead, so the window provider reports itself as unavailable at runtime
-    # One could fix this in the future by using a different window provider than pywinctl
-    "pywinctl",
 )
 # Maps the normalized OS name (see get_os_name) to its platform-specific exclusions
 PLATFORM_NOFOLLOW_IMPORT_TO = {

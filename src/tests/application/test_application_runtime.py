@@ -15,8 +15,8 @@ from powerrules.platform.clock import SystemClockProvider
 from powerrules.platform.linux.power import LinuxPowerProvider
 from powerrules.platform.macos.power import MacOSPowerProvider
 from powerrules.platform.process import PsUtilProcessProvider
-from powerrules.platform.window import PyWinCtlWindowProvider
 from powerrules.platform.windows.power import WindowsPowerProvider
+from powerrules.platform.windows.window import WindowsWindowProvider
 from tests.dummies import Dummy_Action, Dummy_Condition
 
 #########################
@@ -36,7 +36,7 @@ def test_runtime_run_once_evaluates_configuration(
     providers = PlatformProviders(
         clock=Mock(spec=SystemClockProvider),
         process=Mock(spec=PsUtilProcessProvider),
-        window=Mock(spec=PyWinCtlWindowProvider),
+        window=Mock(spec=WindowsWindowProvider),
         power=Mock(spec=WindowsPowerProvider),
     )
 
@@ -317,7 +317,7 @@ def test_runtime_builds_rule_engine_with_platform_providers(
     providers = PlatformProviders(
         clock=Mock(spec=SystemClockProvider),
         process=Mock(spec=PsUtilProcessProvider),
-        window=Mock(spec=PyWinCtlWindowProvider),
+        window=Mock(spec=WindowsWindowProvider),
         power=Mock(spec=WindowsPowerProvider),
     )
 
