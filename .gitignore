@@ -8,3 +8,4 @@ powerrules.log*
 *.dist/
 *.onefile-build/
 nuitka-crash-report.xml
+nuitka-compilation-report.xml

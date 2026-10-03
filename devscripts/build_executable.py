@@ -5,10 +5,14 @@ Usage:
 """
 
 import argparse
+import importlib
+import pkgutil
 import platform
 import re
 import subprocess
 import sys
+import unicodedata
+from collections.abc import Collection
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -16,6 +20,272 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ENTRY_POINT = REPO_ROOT / "src" / "powerrules"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "dist" / "executable"
 VERSION_PATTERN = re.compile(r"(?P<base>\d+\.\d+\.\d+)(?:b(?P<beta>\d+))?")
+
+#########################################################
+# Reduce the binary size by excluding unnecessary modules
+#########################################################
+
+RICH_UNICODE_DATA_PACKAGE = "rich._unicode_data"
+RICH_UNICODE_TABLE_PREFIX = "unicode"
+
+
+def get_submodules_to_exclude(
+    package_name: str,
+    kept_modules: Collection[str],
+    name_prefix: str = "",
+) -> tuple[str, ...]:
+    """Return all submodules of a package except the explicitly kept modules.
+
+    Nuitka's "--nofollow-import-to" overrides "--include-module", so a package cannot be excluded as a whole while some of its modules are kept.
+    Every submodule which is not needed is excluded individually instead.
+
+    Args:
+        package_name: Fully qualified name of the package (e.g. "pygments.lexers").
+        kept_modules: Fully qualified names of the submodules which have to stay available.
+        name_prefix: Only submodules whose own name starts with this prefix are considered. Defaults to all.
+
+    Returns:
+        The sorted, fully qualified names of all submodules to exclude.
+    """
+    package = importlib.import_module(package_name)
+    package_prefix = f"{package_name}."
+
+    modules = {
+        module_info.name
+        for module_info in pkgutil.walk_packages(
+            package.__path__,
+            prefix=package_prefix,
+        )
+        if module_info.name.removeprefix(package_prefix).startswith(name_prefix)
+    }
+
+    return tuple(sorted(modules - set(kept_modules)))
+
+
+def get_rich_unicode_modules_to_keep() -> frozenset[str]:
+    """Return the Unicode width tables of rich which may be loaded at runtime.
+
+    Rich loads exactly one table by name, chosen by the Unicode version of the Python interpreter,
+    and falls back to the newest table at or below that version.
+    Python is bundled into the executable, so the version of the build interpreter is the version used at runtime.
+    The newest table is kept as an additional safety net.
+
+    Returns:
+        The fully qualified names of the Unicode tables to keep.
+    """
+    package_prefix = f"{RICH_UNICODE_DATA_PACKAGE}."
+    table_prefix = f"{package_prefix}{RICH_UNICODE_TABLE_PREFIX}"
+    package = importlib.import_module(RICH_UNICODE_DATA_PACKAGE)
+
+    table_modules = {
+        module_info.name
+        for module_info in pkgutil.iter_modules(package.__path__, prefix=package_prefix)
+        if module_info.name.startswith(table_prefix)
+    }
+
+    def get_table_version(module_name: str) -> tuple[int, ...]:
+        # "rich._unicode_data.unicode15-1-0" -> (15, 1, 0)
+        return tuple(
+            int(part) for part in module_name.removeprefix(table_prefix).split("-")
+        )
+
+    interpreter_version = tuple(
+        int(part) for part in unicodedata.unidata_version.split(".")
+    )
+    newest_table = max(table_modules, key=get_table_version)
+    compatible_tables = [
+        module_name
+        for module_name in table_modules
+        if get_table_version(module_name) <= interpreter_version
+    ]
+    closest_table = max(compatible_tables, key=get_table_version, default=newest_table)
+
+    return frozenset({closest_table, newest_table})
+
+
+# Modules which are loaded by name at runtime, so they have to be included explicitly
+# (the rest of their packages is excluded by get_submodules_to_exclude)
+KEPT_MODULES = frozenset(
+    {
+        # Lexers which have to stay available for pygments and rich tracebacks
+        "pygments.lexers._mapping",
+        "pygments.lexers.python",
+        "pygments.lexers.special",
+        # Styles are only needed for pygments themes. Rich tracebacks use rich's own ANSI theme by default,
+        # "monokai" is the default theme name of rich.syntax and serves as a safety net together with "default"
+        "pygments.styles._mapping",
+        "pygments.styles.default",
+        "pygments.styles.monokai",
+        # The Unicode width table matching the bundled Python (and the newest one)
+        *get_rich_unicode_modules_to_keep(),
+    }
+)
+
+STATIC_NOFOLLOW_IMPORT_TO = (
+    # Only reachable through logging.handlers (SMTPHandler/HTTPHandler). Removes libssl-3.dll and libcrypto-3.dll,
+    # hashlib falls back to its built-in implementations
+    "ssl",
+    "_ssl",
+    "_hashlib",
+    "smtplib",
+    "http.client",
+    "ftplib",
+    "imaplib",
+    "poplib",
+    # Interactive help and REPL, never used by a CLI tool
+    "pydoc",
+    "pydoc_data",
+    "_pyrepl",
+    "code",
+    "codeop",
+    "rlcompleter",
+    "http.server",
+    # The pure Python YAML loader is used, not the libyaml extension
+    "yaml.cyaml",
+    "yaml._yaml",
+    # Only imported by the mypy plugin of pydantic
+    "pydantic.mypy",
+    # Pydantic compatibility modules currently not used by PowerRules
+    # (excluding the whole package also removes its __init__, which "pydantic.v1.*" did not)
+    "pydantic.v1",
+    "pydantic.class_validators",
+    "pydantic.datetime_parse",
+    # Deprecated Pydantic V1 style methods of BaseModel (.json(), .parse_obj(), .copy(), ...) import this lazily
+    "pydantic.deprecated",
+    "pydantic.env_settings",
+    "pydantic.error_wrappers",
+    "pydantic.json",
+    "pydantic.parse",
+    "pydantic.schema",
+    "pydantic.typing",
+    "pydantic.utils",
+    "pydantic.validators",
+    # Only imported by pydantic.deprecated, PowerRules does not use network or color types
+    "pydantic.color",
+    "pydantic.networks",
+    # The standard library is bundled as a whole by Nuitka, these modules are not imported by anything
+    "__hello__",
+    "__phello__",
+    "_markupbase",
+    "cmd",
+    "filecmp",
+    "fileinput",
+    "graphlib",
+    "html.parser",
+    "importlib.metadata.diagnose",
+    "mimetypes",
+    "modulefinder",
+    "netrc",
+    "nturl2path",
+    "pickletools",
+    "pkgutil",
+    "pprint",
+    "pstats",
+    "pyclbr",
+    "sched",
+    "socketserver",
+    "sre_compile",
+    "sre_constants",
+    "sre_parse",
+    "symtable",
+    "timeit",
+    "tomllib",
+    "trace",
+    # Pure Python fallbacks of modules which are always available as built-in or extension modules
+    "_py_abc",
+    "_pyio",
+    "_pydecimal",
+    # Platform support of the standard library for platforms PowerRules does not run on
+    "_aix_support",
+    "_android_support",
+    "_apple_support",
+    # Compression is only imported lazily or guarded by try/except ImportError (shutil, zipfile, tarfile).
+    # Removes _bz2.pyd and _lzma.pyd
+    "bz2",
+    "_bz2",
+    "lzma",
+    "_lzma",
+    "gzip",
+    "_compression",
+    "tarfile",
+    # Only imported lazily by functions PowerRules never calls
+    # (command line entry points of dis, py_compile, random, uuid and webbrowser)
+    "argparse",
+    # zipfile.PyZipFile
+    "py_compile",
+    # random (only used by a self test function)
+    "statistics",
+    # typer.launch()
+    "webbrowser",
+    # Only imported lazily by rich features PowerRules does not use (inspect, print_json, status spinners, ANSI decoding)
+    "rich._inspect",
+    "rich.json",
+    "rich.status",
+    "rich.spinner",
+    "rich._spinners",
+    "rich.live",
+    "rich.live_render",
+    "rich.file_proxy",
+    "rich.ansi",
+)
+# Modules which are pulled in by dependencies or the standard library, but are never used by PowerRules at runtime
+NOFOLLOW_IMPORT_TO = (
+    *STATIC_NOFOLLOW_IMPORT_TO,
+    # Lexers are only needed to highlight source code in rich tracebacks
+    *get_submodules_to_exclude("pygments.lexers", KEPT_MODULES),
+    # Pygments themes are loaded by name and are not used by the default rich traceback theme
+    *get_submodules_to_exclude("pygments.styles", KEPT_MODULES),
+    # Rich only loads the Unicode width table of the bundled Python version
+    *get_submodules_to_exclude(
+        RICH_UNICODE_DATA_PACKAGE,
+        KEPT_MODULES,
+        name_prefix=RICH_UNICODE_TABLE_PREFIX,
+    ),
+)
+WINDOWS_NOFOLLOW_IMPORT_TO = (
+    # GUI parts of pywin32 and XML support, which is only imported by the BSD backend of psutil
+    "pywin",
+    "win32ui",
+    "xml",
+    # Platform-specific psutil backends not used by the Windows build
+    "psutil._psaix",
+    "psutil._psbsd",
+    "psutil._pslinux",
+    "psutil._psosx",
+    "psutil._pssunos",
+    # Windows Event Log support from logging.handlers, not used by PowerRules
+    "win32evtlogutil",
+    # macOS specific part of the standard library (sysconfig)
+    "_osx_support",
+)
+LINUX_NOFOLLOW_IMPORT_TO = (
+    # Platform-specific psutil backends not used by the Linux build
+    "psutil._psaix",
+    "psutil._psbsd",
+    "psutil._psosx",
+    "psutil._pssunos",
+    "psutil._pswindows",
+    # macOS specific part of the standard library (sysconfig)
+    "_osx_support",
+)
+MACOS_NOFOLLOW_IMPORT_TO = (
+    # Platform-specific psutil backends not used by the macOS build
+    "psutil._psaix",
+    "psutil._psbsd",
+    "psutil._pslinux",
+    "psutil._pssunos",
+    "psutil._pswindows",
+    # pywinctl pulls in PyObjC (Foundation), which Nuitka only supports in app bundles (--mode=app)
+    # A single-file binary is built instead, so the window provider reports itself as unavailable at runtime
+    # One could fix this in the future by using a different window provider than pywinctl
+    "pywinctl",
+)
+# Maps the normalized OS name (see get_os_name) to its platform-specific exclusions
+PLATFORM_NOFOLLOW_IMPORT_TO = {
+    "windows": WINDOWS_NOFOLLOW_IMPORT_TO,
+    "linux": LINUX_NOFOLLOW_IMPORT_TO,
+    "macos": MACOS_NOFOLLOW_IMPORT_TO,
+}
 
 
 def get_os_name() -> str:
@@ -107,7 +377,16 @@ def build_nuitka_command(output_dir: Path, output_filename: str) -> list[str]:
         "--include-distribution-metadata=powerrules",
         # Delete all build directories
         "--remove-output",
+        # Write a compilation report file
+        "--report=nuitka-compilation-report.xml",
     ]
+
+    command += [f"--nofollow-import-to={module}" for module in NOFOLLOW_IMPORT_TO]
+    command += [
+        f"--nofollow-import-to={module}"
+        for module in PLATFORM_NOFOLLOW_IMPORT_TO[get_os_name()]
+    ]
+    command += [f"--include-module={module}" for module in sorted(KEPT_MODULES)]
 
     if get_os_name() == "windows":
         try:
@@ -131,14 +410,6 @@ def build_nuitka_command(output_dir: Path, output_filename: str) -> list[str]:
             "--copyright=https://github.com/LeoTN/PowerRules/blob/main/LICENSE",
             "--company-name=https://github.com/LeoTN/PowerRules",
             "--product-name=PowerRules",
-        ]
-
-    if get_os_name() == "macos":
-        command += [
-            # pywinctl pulls in PyObjC (Foundation), which Nuitka only supports in app bundles (--mode=app)
-            # A single-file binary is built instead, so the window provider reports itself as unavailable at runtime
-            # One could fix this in the future by using a different window provider than pywinctl
-            "--nofollow-import-to=pywinctl",
         ]
 
     command.append(str(ENTRY_POINT))
