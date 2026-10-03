@@ -15,6 +15,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENTRY_POINT = REPO_ROOT / "src" / "powerrules"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "dist" / "executable"
+VERSION_PATTERN = re.compile(r"(?P<base>\d+\.\d+\.\d+)(?:b(?P<beta>\d+))?")
 
 
 def get_os_name() -> str:
@@ -59,19 +60,29 @@ def get_arch_name() -> str:
 def build_windows_file_version(package_version: str) -> str:
     """Convert a PowerRules version into the four-part numeric format Windows requires.
 
-    Beta suffixes (e.g. "1.2.3b4") are converted into a fourth numeric component
-    (e.g. "1.2.3.4"), since Windows file versions only support "X.Y.Z.W".
+    Beta suffixes (e.g. "1.2.3b4") are converted into a fourth numeric component shifted by one (e.g. "1.2.3.5"),
+    since Windows file versions only support "X.Y.Z.W".
+    The shift ensures that a first beta ("1.2.3b0") can be told apart from the stable release ("1.2.3.0").
+    Anything after the version (e.g. ".post3.dev0+28b1684") is ignored.
 
     Args:
         package_version: The version reported by importlib.metadata.
 
     Returns:
         The version in "X.Y.Z.W" format.
-    """
-    base_version, _, beta_suffix = package_version.partition("b")
-    beta_number = beta_suffix if beta_suffix else "0"
 
-    return f"{base_version}.{beta_number}"
+    Raises:
+        ValueError: If the version does not start with "X.Y.Z".
+    """
+    match = VERSION_PATTERN.match(package_version)
+
+    if match is None:
+        raise ValueError(f"Unsupported package version '{package_version}'")
+
+    beta = match["beta"]
+    fourth_component = int(beta) + 1 if beta is not None else 0
+
+    return f"{match['base']}.{fourth_component}"
 
 
 def build_nuitka_command(output_dir: Path, output_filename: str) -> list[str]:
@@ -115,7 +126,8 @@ def build_nuitka_command(output_dir: Path, output_filename: str) -> list[str]:
             f"--windows-file-version={windows_file_version}",
             # Windows does allow custom strings as product version, but nuitka denies them. It is what it is
             f"--windows-product-version={windows_file_version}",
-            "--file-description=A rule-based computer power state management tool",
+            # The numeric version cannot express a beta, so the real version is part of the description
+            f"--file-description=A rule-based computer power state management tool ({package_version})",
             "--copyright=https://github.com/LeoTN/PowerRules/blob/main/LICENSE",
             "--company-name=https://github.com/LeoTN/PowerRules",
             "--product-name=PowerRules",

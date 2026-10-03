@@ -158,6 +158,10 @@ jobs:
     name: Build executable (${{ matrix.os }})
     needs: [gather_details, check_pypi, tests]
     runs-on: ${{ matrix.os }}
+    # Always use bash so that POSIX-style variables like $EXPECTED_VERSION work on Windows as well
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
