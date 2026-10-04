@@ -70,7 +70,7 @@ app.add_typer(policy_app, name="policy")
 
 
 def version_callback(value: bool) -> None:
-    """Display the installed PowerRules version."""
+    """Display PowerRules version and exit."""
     if value:
         # The number is highlighted incorrectly and markup is disabled because it's not needed
         console.print(
@@ -84,7 +84,7 @@ def main(
     version: bool = typer.Option(
         False,
         "--version",
-        help="Display the installed PowerRules version.",
+        help="Display PowerRules version and exit.",
         callback=version_callback,
         is_eager=True,
     ),
