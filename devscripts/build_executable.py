@@ -21,6 +21,13 @@ from tests.smoke_test_executable import run_smoke_tests
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENTRY_POINT = REPO_ROOT / "src" / "powerrules"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "dist" / "executable"
+ICON_DIRECTORY = REPO_ROOT / "assets" / "icon"
+# Maps the OS name to the Nuitka icon option and the icon file name.
+# macOS is missing on purpose: a bare single-file binary cannot carry an icon there
+PLATFORM_ICONS: dict[str, tuple[str, str]] = {
+    "windows": ("--windows-icon-from-ico", "executable_icon.ico"),
+    "linux": ("--linux-icon", "executable_icon.png"),
+}
 VERSION_PATTERN = re.compile(r"(?P<base>\d+\.\d+\.\d+)(?:b(?P<beta>\d+))?")
 
 #########################################################
@@ -362,6 +369,9 @@ def build_nuitka_command(output_dir: Path, output_filename: str) -> list[str]:
 
     Returns:
         The full Nuitka command line, ready to be executed.
+
+    Raises:
+        FileNotFoundError: If the icon for the current platform does not exist.
     """
     command = [
         sys.executable,
@@ -385,6 +395,15 @@ def build_nuitka_command(output_dir: Path, output_filename: str) -> list[str]:
         for module in PLATFORM_NOFOLLOW_IMPORT_TO[get_os_name()]
     ]
     command += [f"--include-module={module}" for module in sorted(KEPT_MODULES)]
+
+    icon_setting = PLATFORM_ICONS.get(get_os_name())
+    if icon_setting is not None:
+        icon_option, icon_filename = icon_setting
+        icon_path = ICON_DIRECTORY / icon_filename
+        # Fail early instead of silently building an executable without an icon
+        if not icon_path.is_file():
+            raise FileNotFoundError(f"Icon file not found: {icon_path}")
+        command.append(f"{icon_option}={icon_path}")
 
     if get_os_name() == "windows":
         try:
