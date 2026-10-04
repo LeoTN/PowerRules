@@ -16,6 +16,8 @@ from collections.abc import Collection
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from tests.smoke_test_executable import run_smoke_tests
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENTRY_POINT = REPO_ROOT / "src" / "powerrules"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "dist" / "executable"
@@ -430,15 +432,16 @@ def main() -> None:
 
     os_name = get_os_name()
     arch_name = get_arch_name()
+    output_dir = arguments.output_dir.resolve()
     output_filename = f"powerrules-{os_name}-{arch_name}"
 
     if os_name == "windows":
         output_filename += ".exe"
 
-    output_full_path = arguments.output_dir / output_filename
+    output_full_path = output_dir / output_filename
 
     command = build_nuitka_command(
-        output_dir=arguments.output_dir,
+        output_dir=output_dir,
         output_filename=output_filename,
     )
 
@@ -471,6 +474,14 @@ def main() -> None:
                 f"[ERROR] Binary verification failed due to unexpected version: expected '{expected_output}', got '{version_output}'"
             )
             sys.exit(1)
+
+    print("[INFO] Running smoke tests...")
+    failures = run_smoke_tests(output_full_path)
+
+    if failures:
+        for failure in failures:
+            print(f"[ERROR] Smoke test failed: {failure}")
+        sys.exit(1)
 
     print(f"[INFO] Binary verification successful: {version_output}")
 
