@@ -165,7 +165,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Pinned OS version instead of latest, so the environment do not change unexpectedly
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2025, macos-26]
     env:
       POETRY_DYNAMIC_VERSIONING_BYPASS: ${{ needs.gather_details.outputs.new_version }}
     steps:

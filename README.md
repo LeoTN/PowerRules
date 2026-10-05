@@ -206,9 +206,9 @@ pwru policy run
 
 | Platform | Standalone Binary | Notes |
 |----------|-----------------------| ----- |
-| Windows 10/11 | [powerrules-windows-x86_64.exe](https://github.com/LeoTN/PowerRules/releases/download/latest/powerrules-windows-x86_64.exe) | Window conditions only work when PowerRules runs in the logged-in user's session. |
-| Linux | [powerrules-linux-x86_64](https://github.com/LeoTN/PowerRules/releases/download/latest/powerrules-linux-x86_64) | Window conditions require an X11 session (Wayland is not supported). |
-| macOS | [powerrules-macos-arm64](https://github.com/LeoTN/PowerRules/releases/download/latest/powerrules-macos-arm64) | Hibernation action is not supported. |
+| Windows 10/11 | [powerrules-windows-x86_64.exe](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-windows-x86_64.exe) | Window conditions only work when PowerRules runs in the logged-in user's session. |
+| Linux | [powerrules-linux-x86_64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-linux-x86_64)<br>[powerrules-linux-arm64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-linux-arm64) | Window conditions require an X11 session (Wayland is currently not supported). |
+| macOS | [powerrules-macos-arm64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-macos-arm64) | Hibernation action is not supported. |
 
 **Platform independent via pip:**
 ```bash
