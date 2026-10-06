@@ -30,13 +30,14 @@ jobs:
             # A failing platform should not hide the results of the other ones
             fail-fast: false
             matrix:
-                os: [ubuntu-latest, windows-latest, macos-latest]
+                # Same operating systems as in the release workflow
+                os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2025, macos-26]
                 python-version: ["3.13"]
                 include:
                     # The lowest supported Python version
-                    - os: ubuntu-latest
+                    - os: ubuntu-24.04
                       python-version: "3.11"
-                    - os: ubuntu-latest
+                    - os: ubuntu-24.04
                       python-version: "3.12"
         steps:
             - uses: actions/checkout@v6

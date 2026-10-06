@@ -25,19 +25,19 @@ Rules are evaluated from top to bottom. The first matching rule executes its con
 
 ## Getting Started
 
-**Install with pip:**
+1\. Install via [pip](https://pypi.org/project/powerrules) (Python 3.11+) or download a [standalone binary](#supported-platforms):
 
 ```bash
 pip install powerrules
 ```
 
-**Create a policy file:**
+2\. Create a policy file:
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/LeoTN/PowerRules/main/assets/schema/powerrules_policy.schema.json
 
 rules:
-  # Shut down when no backup process is running, a matching backup window is open, and the current time is between 23:00 and 01:30
+  # Shut down when no backup process is running and the current time is between 23:00 and 01:30
   - name: "Shutdown after nightly backup"
     enabled: true
     conditions:
@@ -45,11 +45,6 @@ rules:
         - process:
             name: "backup.exe"
             exists: false
-        - window:
-            title: "Backup Nr. [0-9]+ Completed"
-            exists: true
-            match:
-              type: regex
         - datetime:
             between:
               start: "23"
@@ -58,11 +53,15 @@ rules:
       type: shutdown
 ```
 
-**Evaluate the policy once. Use `--dry-run` to see what would happen:**
+3\. Validate and evaluate the policy once. Use `--dry-run` to see what would happen:
 
 ```bash
+pwru policy validate --policy my-policy.yaml
 pwru policy run --once --policy my-policy.yaml --dry-run
 ```
+
+> [!NOTE]
+> `pwru` is installed by pip. When using a [standalone binary](#supported-platforms), call it by its file name instead.
 
 ## Features
 
@@ -87,17 +86,18 @@ Match rules based on processes and window titles.
 Match process names and window titles using regular expressions with full-string matching.
 
 ```yaml
-# Match if process name ends with "firefox"
+# Match if process name contains "fire"
 - process:
-    name: ".*firefox.exe"
+    name: '.*fire.*'
+    exists: true
     match:
       type: regex
-      # This is the default behavior
-      case_sensitive: true
+      case_sensitive: true # This is the default behavior
 
 # Match if window title starts with "firefox" (case insensitive)
 - window:
     title: "Firefox.*"
+    exists: true
     match:
       type: regex
       case_sensitive: false
@@ -194,31 +194,35 @@ Shutdown, sleep, hibernate, or reboot your computer.
 
 ### Continuous Evaluation
 
-Evaluate rules at a set interval. A matching rule is triggered only when it becomes the active match, avoiding repeated execution while the same rule remains matched.
+Evaluate rules every 10 seconds. A matching rule is triggered only when it becomes the active match, avoiding repeated execution while the same rule remains matched.
 
 ```bash
 pwru policy run
 ```
 
-`--stop-on-match` can be used to stop the evaluation after the first match.
+`--stop-on-match` can be used to stop the evaluation after the first match. The policy is loaded once at startup, so changes to the file require a restart.
 
 ## Supported Platforms
 
-| Platform | Status |
-|----------|:------:|
-| Windows 10/11 | ✅ |
-| Linux | ✅ |
-| macOS* | ✅ |
+| Platform | Standalone Binary | Notes |
+|----------|-----------------------| ----- |
+| Windows 10/11 | [powerrules-windows-x86_64.exe](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-windows-x86_64.exe) | Window conditions only work when PowerRules runs in the logged-in user's session. |
+| Linux | [powerrules-linux-x86_64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-linux-x86_64)<br>[powerrules-linux-arm64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-linux-arm64) | Window conditions require an X11 session (Wayland is currently not supported). |
+| macOS | [powerrules-macos-arm64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-macos-arm64) | Hibernation action is not supported. |
 
-\* Hibernation is not supported on macOS.
+**Platform independent via pip:**
+```bash
+pip install powerrules
+```
 
 ## Credits & License
 
+* [Inkscape](https://inkscape.org) → program used to design the logo
+* [Nuitka](https://github.com/nuitka/nuitka) → standalone binaries
+* [psutil](https://github.com/giampaolo/psutil) → process information
 * [Pydantic](https://github.com/pydantic/pydantic) → configuration validation
 * [PyYAML](https://github.com/yaml/pyyaml) → YAML policy parsing
+* [rich](https://github.com/textualize/rich) → console output formatting
 * [Typer](https://github.com/fastapi/typer) → command-line interface
-* [psutil](https://github.com/giampaolo/psutil) → process information
-* [PyWinCtl](https://github.com/Kalmat/PyWinCtl) → window information
-* [Inkscape](https://inkscape.org) → program used to design the logo
 
 *This repository is licensed under the [MIT License](https://github.com/LeoTN/PowerRules/blob/main/LICENSE).*

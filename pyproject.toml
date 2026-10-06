@@ -40,7 +40,6 @@ classifiers = [
 dependencies = [
     "psutil>=7.0,<8.0",
     "pydantic>=2.11,<3.0",
-    "pywinctl>=0.4.1,<0.5.0",
     "pyyaml>=6.0,<7.0",
     "rich>=14.0",
     "typer>=0.27.1,<0.28.0"
@@ -60,6 +59,7 @@ pwru = "powerrules.cli.app:app"
 
 [dependency-groups]
 dev = [
+    "nuitka[onefile]>=4.0,<5.0",
     "pytest>=9.0,<10.0",
     "ruff>=0.16.4,<0.17.0"
 ]
@@ -71,3 +71,12 @@ version = "0.0.0"
 [tool.poetry-dynamic-versioning]
 enable = true
 pattern = "default-unprefixed"
+
+[tool.pytest.ini_options]
+pythonpath = ["devscripts"]
+
+[tool.ruff.lint.per-file-ignores]
+# The tests deliberately use naive datetimes like the application itself
+"src/tests/**" = ["DTZ001", "DTZ005"]
+# Pydantic only converts ValueError (not TypeError) raised in validators into a ValidationError
+"src/powerrules/config/models.py" = ["TRY004"]
