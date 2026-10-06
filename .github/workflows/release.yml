@@ -154,9 +154,61 @@ jobs:
     needs: check_pypi
     uses: ./.github/workflows/tests.yml
 
+  build_executables:
+    name: Build executable (${{ matrix.os }})
+    needs: [gather_details, check_pypi, tests]
+    runs-on: ${{ matrix.os }}
+    # Always use bash so that POSIX-style variables like $EXPECTED_VERSION work on Windows as well
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pinned OS version instead of latest, so the environment do not change unexpectedly
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2025, macos-26]
+    env:
+      POETRY_DYNAMIC_VERSIONING_BYPASS: ${{ needs.gather_details.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # https://github.com/actions/setup-python/blob/v7/docs/advanced-usage.md#caching-packages
+      - name: Install poetry
+        run: |
+          pipx install poetry==2.4.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: "poetry"
+
+      - name: Install dependencies
+        # Only install the dependencies, but not PowerRules itself
+        run: |
+          poetry sync --no-root
+
+      # Install the package non-editable, so the version comes from the build backend (POETRY_DYNAMIC_VERSIONING_BYPASS) and Nuitka finds the package files in the distribution
+      - name: Install package non-editable
+        run: |
+          poetry run pip install --no-deps .
+
+      - name: Build executable
+        env:
+          EXPECTED_VERSION: ${{ needs.gather_details.outputs.new_version }}
+        run: |
+          poetry run python devscripts/build_executable.py --output-dir dist/executable --expected-version "$EXPECTED_VERSION"
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: executable-${{ matrix.os }}
+          path: dist/executable/powerrules-*
+
   build_and_publish:
     name: Build and publish package to PyPI
-    needs: [gather_details, check_pypi, tests]
+    # The executables need to be built correctly before a PyPI release is created
+    needs: [gather_details, check_pypi, tests, build_executables]
     runs-on: ubuntu-latest
     env:
       # The version is not stored in the repository, it is set explicitly for this run
@@ -179,9 +231,9 @@ jobs:
           cache: "poetry"
 
       - name: Install dependencies
+        # Only install the dependencies, but not PowerRules itself
         run: |
-          poetry sync
-          poetry install --no-interaction
+          poetry sync --no-root
 
       - name: Build source and wheel distribution
         run: |
@@ -275,11 +327,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download artifacts
+      - name: Download package artifacts
         uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
+
+      - name: Download executable artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: executable-*
+          path: executables/
+          merge-multiple: true
 
       - name: Create GitHub release
         id: create_release
@@ -290,7 +349,7 @@ jobs:
           TARGET_SHA: ${{ github.sha }}
         run: |
           if [ "$IS_BETA" = "true" ]; then
-              gh release create "$TAG_NAME" dist/* --title "$TAG_NAME" --prerelease --target "$TARGET_SHA"
+              gh release create "$TAG_NAME" dist/* executables/* --title "$TAG_NAME" --prerelease --target "$TARGET_SHA"
           else
-              gh release create "$TAG_NAME" dist/* --title "$TAG_NAME" --generate-notes --target "$TARGET_SHA"
+              gh release create "$TAG_NAME" dist/* executables/* --title "$TAG_NAME" --generate-notes --target "$TARGET_SHA"
           fi
