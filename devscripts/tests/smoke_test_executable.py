@@ -121,7 +121,7 @@ SCENARIOS = (
     SmokeScenario(
         name="help",
         arguments=("--help",),
-        expected_output=("A rule-based computer power state management tool",),
+        expected_output=("A rule-based command automation tool",),
     ),
     SmokeScenario(
         name="validate valid policy",
@@ -256,14 +256,18 @@ def _run_scenario(
     Returns:
         A description of the failure, or None if the scenario passed.
     """
+    # The logging options belong to the "policy" commands, other scenarios (e.g. "--help") do not log
+    log_arguments = (
+        ("--log-file", str(log_path)) if scenario.arguments[:1] == ("policy",) else ()
+    )
+
     command = [
         str(executable),
-        "--log-file",
-        str(log_path),
         *(
             argument.replace(POLICY_PLACEHOLDER, str(policy_path))
             for argument in scenario.arguments
         ),
+        *log_arguments,
     ]
 
     try:

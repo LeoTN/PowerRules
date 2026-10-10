@@ -59,7 +59,7 @@ def test_cli_displays_help() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "A rule-based computer power state management tool" in result.stdout
+    assert "A rule-based command automation tool" in result.stdout
 
 
 def test_cli_version() -> None:

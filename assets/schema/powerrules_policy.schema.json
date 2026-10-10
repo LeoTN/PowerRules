@@ -291,7 +291,6 @@
                 },
                 "exists": {
                     "type": "boolean",
-                    "default": true,
                     "description": "Whether the window is expected to exist."
                 },
                 "match": {

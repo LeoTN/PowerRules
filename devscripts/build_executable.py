@@ -425,7 +425,7 @@ def build_nuitka_command(output_dir: Path, output_filename: str) -> list[str]:
             # Windows does allow custom strings as product version, but nuitka denies them. It is what it is
             f"--windows-product-version={windows_file_version}",
             # The numeric version cannot express a beta, so the real version is part of the description
-            f"--file-description=A rule-based computer power state management tool ({package_version})",
+            f"--file-description=A rule-based command automation tool ({package_version})",
             "--copyright=https://github.com/LeoTN/PowerRules/blob/main/LICENSE",
             "--company-name=https://github.com/LeoTN/PowerRules",
             "--product-name=PowerRules",
