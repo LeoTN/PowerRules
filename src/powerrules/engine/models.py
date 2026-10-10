@@ -6,11 +6,11 @@ from powerrules.conditions.base import Condition
 
 @dataclass(frozen=True)
 class Rule:
-    """A rule consisting of a condition and an action."""
+    """A rule consisting of a condition and the actions which are executed in order when it matches."""
 
     name: str
     condition: Condition
-    action: Action
+    actions: tuple[Action, ...]
     enabled: bool = True
 
 

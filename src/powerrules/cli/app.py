@@ -7,7 +7,10 @@ import typer
 from rich.markup import escape
 
 from powerrules.application.logging import LogLevel, configure_logging, console
-from powerrules.application.runtime import PowerRulesRuntime, describe_action
+from powerrules.application.runtime import (
+    PowerRulesRuntime,
+    describe_actions,
+)
 from powerrules.cli.errors import cli_command
 from powerrules.config.loader import ConfigurationLoader
 
@@ -161,12 +164,12 @@ def run(
             logger.info("No rule matched")
         elif dry_run:
             logger.info(
-                f"[DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed action: {describe_action(result.matched_rule.action)}"
+                f"[DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed actions: {describe_actions(result.matched_rule)}"
             )
         # Technically, the system could already be shut down at this point, but this usually takes a few seconds
         else:
             logger.info(
-                f"Rule '{result.matched_rule.name}' matched, executed action: {describe_action(result.matched_rule.action)}"
+                f"Rule '{result.matched_rule.name}' matched, executed actions: {describe_actions(result.matched_rule)}"
             )
 
         return
@@ -185,12 +188,12 @@ def run(
 
         if dry_run:
             logger.info(
-                f"[DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed action: {describe_action(result.matched_rule.action)}"
+                f"[DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed actions: {describe_actions(result.matched_rule)}"
             )
         # Technically, the system could already be shut down at this point, but this usually takes a few seconds
         else:
             logger.info(
-                f"Rule '{result.matched_rule.name}' matched, executed action: {describe_action(result.matched_rule.action)}"
+                f"Rule '{result.matched_rule.name}' matched, executed actions: {describe_actions(result.matched_rule)}"
             )
 
         if stop_on_match:

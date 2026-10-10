@@ -4,49 +4,32 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from powerrules.actions.base import Action
-from powerrules.actions.power import (
-    HibernateAction,
-    RebootAction,
-    ShutdownAction,
-    SleepAction,
-)
 from powerrules.config.builder import ConfigurationBuilder
 from powerrules.config.loader import ConfigurationLoader
 from powerrules.engine.models import Rule, RuleEvaluationResult
 from powerrules.engine.rule_engine import RuleEngine
 from powerrules.platform.clock import SystemClockProvider
-from powerrules.platform.linux.power import LinuxPowerProvider
+from powerrules.platform.command import SubprocessCommandProvider
 from powerrules.platform.linux.window import LinuxWindowProvider
-from powerrules.platform.macos.power import MacOSPowerProvider
 from powerrules.platform.macos.window import MacOSWindowProvider
 from powerrules.platform.process import PsUtilProcessProvider
-from powerrules.platform.windows.power import WindowsPowerProvider
 from powerrules.platform.windows.window import WindowsWindowProvider
 from powerrules.providers.clock import ClockProvider
-from powerrules.providers.power import PowerProvider
+from powerrules.providers.command import CommandProvider, Shell
 from powerrules.providers.process import ProcessProvider
 from powerrules.providers.window import WindowProvider
 
-# Maps the built-in power actions to their configured type name (see ActionConfiguration.type)
-_ACTION_TYPE_NAMES: dict[type[Action], str] = {
-    ShutdownAction: "shutdown",
-    SleepAction: "sleep",
-    HibernateAction: "hibernate",
-    RebootAction: "reboot",
-}
 
-
-def describe_action(action: Action) -> str:
-    """Return a human-readable name for an action.
+def describe_actions(rule: Rule) -> str:
+    """Return a human-readable list of the actions of a rule.
 
     Args:
-        action: PowerRules action to describe.
+        rule: PowerRules rule whose actions are described.
 
     Returns:
-        The action's configured type name (e.g. "shutdown") or its class name if it is not one of the built-in power actions.
+        The quoted names of the actions separated by commas (e.g. "'Cleanup', 'Shutdown'").
     """
-    return _ACTION_TYPE_NAMES.get(type(action), type(action).__name__)
+    return ", ".join(f"'{action.name}'" for action in rule.actions)
 
 
 class PowerRulesRuntime:
@@ -181,8 +164,10 @@ class PowerRulesRuntime:
             process_provider=providers.process,
             # Information about windows (not the OS :D)
             window_provider=providers.window,
-            # Basically an API to interact with the power state of the OS
-            power_provider=providers.power,
+            # Runs the commands of the actions
+            command_provider=providers.command,
+            # Commands run in the directory of the policy by default, no matter where PowerRules was started
+            base_directory=configuration_path.resolve().parent,
         ).build(configuration)
 
         return RuleEngine(rule_set.rules)
@@ -195,7 +180,7 @@ class PlatformProviders:
     clock: ClockProvider
     process: ProcessProvider
     window: WindowProvider
-    power: PowerProvider
+    command: CommandProvider
 
 
 def get_platform_providers() -> PlatformProviders:
@@ -214,7 +199,7 @@ def get_platform_providers() -> PlatformProviders:
             clock=SystemClockProvider(),
             process=PsUtilProcessProvider(),
             window=WindowsWindowProvider(),
-            power=WindowsPowerProvider(),
+            command=SubprocessCommandProvider(default_shell=Shell.POWERSHELL),
         )
 
     if system_name == "Linux":
@@ -222,7 +207,7 @@ def get_platform_providers() -> PlatformProviders:
             clock=SystemClockProvider(),
             process=PsUtilProcessProvider(),
             window=LinuxWindowProvider(),
-            power=LinuxPowerProvider(),
+            command=SubprocessCommandProvider(default_shell=Shell.SH),
         )
 
     # MacOS
@@ -231,7 +216,7 @@ def get_platform_providers() -> PlatformProviders:
             clock=SystemClockProvider(),
             process=PsUtilProcessProvider(),
             window=MacOSWindowProvider(),
-            power=MacOSPowerProvider(),
+            command=SubprocessCommandProvider(default_shell=Shell.SH),
         )
 
     raise RuntimeError(f"Unsupported operating system: {system_name}")
