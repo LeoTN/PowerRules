@@ -24,7 +24,8 @@ FORBIDDEN_OUTPUT = (
     "Unexpected error",
 )
 
-# Matches on every day of the next centuries, so the result does not depend on when the test runs
+# Matches on every day of the next centuries, so the result does not depend on when the test runs.
+# The commands are never run, because every scenario which evaluates a policy uses "--dry-run"
 MATCHING_POLICY = """
 rules:
   - name: "Smoke test rule"
@@ -42,8 +43,11 @@ rules:
               end: "2999-12-31"
             weekday: [Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday]
             month: [January, February, March, April, May, June, July, August, September, October, November, December]
-    action:
-      type: shutdown
+    actions:
+      - name: "Cleanup"
+        run: "echo cleanup"
+      - name: "Shutdown"
+        run: "echo shutdown"
 """
 
 # The window provider is usually not available on CI runners, so both a match and an evaluation error are fine
@@ -54,8 +58,20 @@ rules:
       window:
         title: "powerrules-smoke-test-window"
         exists: false
+    actions:
+      - run: "echo sleep"
+"""
+
+# The format of the actions before commands were introduced
+FORMER_ACTION_POLICY = """
+rules:
+  - name: "Former action rule"
+    conditions:
+      process:
+        name: "backup.exe"
+        exists: false
     action:
-      type: sleep
+      type: shutdown
 """
 
 INVALID_YAML_POLICY = """
@@ -131,7 +147,7 @@ SCENARIOS = (
         ),
         policy=MATCHING_POLICY,
         expected_output=(
-            "[DRY RUN] Rule 'Smoke test rule' matched, would have executed action: shutdown",
+            "[DRY RUN] Rule 'Smoke test rule' matched, would have executed actions: 'Cleanup', 'Shutdown'",
         ),
     ),
     SmokeScenario(
@@ -177,6 +193,13 @@ SCENARIOS = (
         name="invalid policy",
         arguments=("policy", "validate", "--policy", POLICY_PLACEHOLDER),
         policy=INVALID_POLICY,
+        expected_exit_codes=frozenset({EXIT_POLICY_ERROR}),
+        expected_output=("Policy validation failed",),
+    ),
+    SmokeScenario(
+        name="former action format",
+        arguments=("policy", "validate", "--policy", POLICY_PLACEHOLDER),
+        policy=FORMER_ACTION_POLICY,
         expected_exit_codes=frozenset({EXIT_POLICY_ERROR}),
         expected_output=("Policy validation failed",),
     ),
