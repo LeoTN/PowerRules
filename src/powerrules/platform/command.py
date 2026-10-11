@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
 
@@ -89,6 +90,44 @@ def _decode_output(output: bytes) -> str:
     return output.decode(_get_output_encoding(), errors="replace")
 
 
+def _normalize_environment_name(name: str) -> str:
+    """Return the name which identifies an environment variable on the current platform.
+
+    Environment variable names are case-insensitive on Windows, but case-sensitive elsewhere.
+    """
+    return name.upper() if sys.platform == "win32" else name
+
+
+def _merge_environment(additional_environment: Mapping[str, str]) -> dict[str, str]:
+    """Merge variables into a copy of the environment of the current PowerRules process.
+
+    An additional variable replaces an existing one even if the spelling differs on Windows
+    (e.g. "Path" replaces "PATH"), so the child process never receives a duplicate.
+
+    Args:
+        additional_environment: Variables which take precedence over the existing ones.
+
+    Returns:
+        The merged environment. The environment of the current process stays untouched.
+    """
+    environment = dict(os.environ)
+    # Map the normalized names to the original names
+    names = {_normalize_environment_name(name): name for name in environment}
+
+    for name, value in additional_environment.items():
+        normalized_name = _normalize_environment_name(name)
+
+        previous_name = names.get(normalized_name)
+        # Delete already existing variables with the "same" name
+        if previous_name is not None:
+            del environment[previous_name]
+
+        environment[name] = value
+        names[normalized_name] = name
+
+    return environment
+
+
 def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
     """Kill a process and all of its descendants.
 
@@ -145,7 +184,7 @@ class SubprocessCommandProvider:
         _ensure_shell_is_available(shell)
         arguments = build_shell_arguments(shell, request.command)
         # Merge the platform environment with the request environment variables, the request variables take precedence
-        environment = {**os.environ, **request.environment}
+        environment = _merge_environment(request.environment)
 
         if not request.wait:
             self._start_in_background(arguments, request.working_directory, environment)

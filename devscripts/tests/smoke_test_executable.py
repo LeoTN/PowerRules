@@ -1,6 +1,7 @@
 """Run smoke tests against a built PowerRules executable (called by build_executable.py, not pytest).
 
-Every scenario only validates policies or uses "--dry-run", so the power state of the machine is never changed.
+Every scenario only validates policies or uses "--dry-run", except the scenarios which are marked with
+"executes_commands". Those only run harmless commands (echo, an exit code and a sleep).
 """
 
 import subprocess
@@ -12,6 +13,9 @@ SCENARIO_TIMEOUT_SECONDS = 120
 
 # Placeholder for the path of the policy file in the arguments of a scenario
 POLICY_PLACEHOLDER = "{policy}"
+
+# Mirrors EXIT_RUNTIME_ERROR of powerrules.cli.errors
+EXIT_RUNTIME_ERROR = 1
 
 # Mirrors EXIT_POLICY_ERROR of powerrules.cli.errors, the executable is intentionally tested as a black box
 EXIT_POLICY_ERROR = 2
@@ -25,7 +29,7 @@ FORBIDDEN_OUTPUT = (
 )
 
 # Matches on every day of the next centuries, so the result does not depend on when the test runs.
-# The commands are never run, because every scenario which evaluates a policy uses "--dry-run"
+# The commands of this policy are never run, because every scenario which evaluates it uses "--dry-run"
 MATCHING_POLICY = """
 rules:
   - name: "Smoke test rule"
@@ -62,6 +66,48 @@ rules:
       - run: "echo sleep"
 """
 
+# The following policies run real commands. They behave the same in PowerShell and sh and never change the machine
+REAL_COMMAND_POLICY = """
+rules:
+  - name: "Smoke test real command"
+    conditions:
+      datetime:
+        between:
+          start: "2000-01-01"
+          end: "2999-12-31"
+    actions:
+      - name: "Echo"
+        run: "echo powerrules-smoke-test"
+"""
+
+FAILING_COMMAND_POLICY = """
+rules:
+  - name: "Smoke test failing command"
+    conditions:
+      datetime:
+        between:
+          start: "2000-01-01"
+          end: "2999-12-31"
+    actions:
+      - name: "Failing"
+        run: "exit 3"
+"""
+
+# Exercises the termination of the process tree after the timeout
+TIMEOUT_COMMAND_POLICY = """
+rules:
+  - name: "Smoke test command timeout"
+    conditions:
+      datetime:
+        between:
+          start: "2000-01-01"
+          end: "2999-12-31"
+    actions:
+      - name: "Slow"
+        run: "sleep 30"
+        timeout: 1
+"""
+
 # The format of the actions before commands were introduced
 FORMER_ACTION_POLICY = """
 rules:
@@ -86,8 +132,10 @@ rules:
       process:
         name: "backup.exe"
         exists: "not a boolean"
-    action:
-      type: shutdown
+    actions:
+      # Windows command
+      - name: "Shutdown"
+        run: "shutdown /s /t 0"
 """
 
 
@@ -101,6 +149,7 @@ class SmokeScenario:
         policy: Content of the policy file. None means that no policy file exists.
         expected_exit_codes: Accepted exit codes of the executable.
         expected_output: Strings which have to be part of the combined stdout and stderr.
+        executes_commands: Allows a policy run without "--dry-run". Only set it for policies with harmless commands.
     """
 
     name: str
@@ -108,10 +157,15 @@ class SmokeScenario:
     policy: str | None = None
     expected_exit_codes: frozenset[int] = frozenset({0})
     expected_output: tuple[str, ...] = ()
+    executes_commands: bool = False
 
     def __post_init__(self) -> None:
-        # Safety net: a scenario must never be able to change the power state of the machine
-        if "run" in self.arguments and "--dry-run" not in self.arguments:
+        # Safety net: a scenario must never be able to run commands on the machine without "--dry-run", except the scenario is explicitly marked as safe
+        if (
+            "run" in self.arguments
+            and "--dry-run" not in self.arguments
+            and not self.executes_commands
+        ):
             raise ValueError(
                 f"Scenario '{self.name}' runs a policy without '--dry-run'"
             )
@@ -175,6 +229,30 @@ SCENARIOS = (
         ),
         policy=WINDOW_POLICY,
         expected_exit_codes=frozenset({0, 1}),
+    ),
+    SmokeScenario(
+        name="run once with real command",
+        arguments=("policy", "run", "--once", "--policy", POLICY_PLACEHOLDER),
+        policy=REAL_COMMAND_POLICY,
+        executes_commands=True,
+        # This message is only logged after the command was started and finished
+        expected_output=("Action 'Echo' finished with exit code 0",),
+    ),
+    SmokeScenario(
+        name="run once with failing command",
+        arguments=("policy", "run", "--once", "--policy", POLICY_PLACEHOLDER),
+        policy=FAILING_COMMAND_POLICY,
+        executes_commands=True,
+        expected_exit_codes=frozenset({EXIT_RUNTIME_ERROR}),
+        expected_output=("Action 'Failing' returned exit code 3, expected one of: 0",),
+    ),
+    SmokeScenario(
+        name="run once with command timeout",
+        arguments=("policy", "run", "--once", "--policy", POLICY_PLACEHOLDER),
+        policy=TIMEOUT_COMMAND_POLICY,
+        executes_commands=True,
+        expected_exit_codes=frozenset({EXIT_RUNTIME_ERROR}),
+        expected_output=("Action 'Slow' timed out after 1 seconds",),
     ),
     SmokeScenario(
         name="missing policy file",

@@ -15,6 +15,7 @@ from powerrules.engine.models import Rule, RuleEvaluationResult, RuleSet
 from powerrules.platform.clock import SystemClockProvider
 from powerrules.platform.command import SubprocessCommandProvider
 from powerrules.platform.process import PsUtilProcessProvider
+from powerrules.providers.command import Shell
 from tests.mocks import (
     make_action,
     make_clock_provider,
@@ -386,6 +387,7 @@ def test_get_platform_providers_returns_windows_providers() -> None:
     assert isinstance(providers.clock, SystemClockProvider)
     assert isinstance(providers.process, PsUtilProcessProvider)
     assert isinstance(providers.command, SubprocessCommandProvider)
+    assert providers.command.default_shell is Shell.POWERSHELL
 
 
 def test_get_platform_providers_returns_linux_providers() -> None:
@@ -399,6 +401,7 @@ def test_get_platform_providers_returns_linux_providers() -> None:
     assert isinstance(providers.clock, SystemClockProvider)
     assert isinstance(providers.process, PsUtilProcessProvider)
     assert isinstance(providers.command, SubprocessCommandProvider)
+    assert providers.command.default_shell is Shell.SH
 
 
 def test_get_platform_providers_returns_macos_providers() -> None:
@@ -412,6 +415,7 @@ def test_get_platform_providers_returns_macos_providers() -> None:
     assert isinstance(providers.clock, SystemClockProvider)
     assert isinstance(providers.process, PsUtilProcessProvider)
     assert isinstance(providers.command, SubprocessCommandProvider)
+    assert providers.command.default_shell is Shell.SH
 
 
 def test_get_platform_providers_rejects_unsupported_platform() -> None:
