@@ -1,6 +1,7 @@
 import re
 from datetime import date, datetime, time
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Literal, TypeVar
 
 from pydantic import (
@@ -9,14 +10,21 @@ from pydantic import (
     Discriminator,
     Field,
     StrictBool,
+    StrictFloat,
+    StrictInt,
     Tag,
     ValidationInfo,
     field_validator,
     model_validator,
 )
 
+from powerrules.actions.command import (
+    DEFAULT_ACTION_TIMEOUT_SECONDS,
+    RESERVED_ENVIRONMENT_PREFIX,
+)
 from powerrules.conditions.datetime import Month, Weekday
 from powerrules.conditions.matcher import MatchType
+from powerrules.providers.command import Shell
 
 EnumType = TypeVar("EnumType", bound=StrEnum)
 
@@ -360,16 +368,168 @@ class ConditionConfiguration(BaseModel):
 
 
 class ActionConfiguration(BaseModel):
-    """Configuration for an action."""
+    """Configuration for an action which runs a command.
+
+    Unset optional values fall back to their defaults when the action is built.
+    For example, the default shell depends on the operating system.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal[
-        "shutdown",
-        "sleep",
-        "hibernate",
-        "reboot",
-    ]
+    run: str
+    name: str | None = None
+    shell: Shell | None = None
+    working_directory: Path | None = None
+    # The values may be secrets, so they are excluded from the representation of the model
+    env: dict[str, str] = Field(default_factory=dict, repr=False)
+    # None means that the command may run without a time limit
+    timeout: StrictInt | StrictFloat | None = DEFAULT_ACTION_TIMEOUT_SECONDS
+    success_exit_codes: list[StrictInt] = Field(
+        default_factory=lambda: [0], min_length=1
+    )
+    wait: StrictBool = True
+    continue_on_error: StrictBool = False
+
+    @field_validator("run", "name")
+    @classmethod
+    def validate_not_blank(cls, value: str | None, info: ValidationInfo) -> str | None:
+        """Validate that a configured text is not empty or whitespace only.
+
+        Args:
+            value: Configured text, or None if not configured.
+            info: Validation information containing the name of the field.
+
+        Returns:
+            The validated text.
+
+        Raises:
+            ValueError: If the text is blank.
+        """
+        if value is not None and not value.strip():
+            raise ValueError(f"The '{info.field_name}' value must not be blank")
+
+        return value
+
+    @field_validator("working_directory", mode="before")
+    @classmethod
+    def validate_working_directory_not_blank(cls, value: object) -> object:
+        """Validate that a configured working directory is not blank.
+
+        An empty string would otherwise silently become the current directory.
+
+        Args:
+            value: Configured working directory.
+
+        Returns:
+            The unchanged value, so the regular validation converts it to a path.
+
+        Raises:
+            ValueError: If the working directory is a blank string.
+        """
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("The 'working_directory' value must not be blank")
+
+        return value
+
+    @field_validator("env", mode="before")
+    @classmethod
+    def convert_environment_values_to_strings(cls, value: object) -> object:
+        """Convert numbers and booleans of the environment variables to strings.
+
+        YAML turns an unquoted value like 1 or true into a number or boolean, but environment variables are always strings.
+
+        Args:
+            value: Configured environment variables.
+
+        Returns:
+            The variables with converted values. Anything else is returned unchanged, so it is rejected by the regular validation.
+        """
+        if not isinstance(value, dict):
+            return value
+
+        return {
+            variable_name: _convert_environment_value(variable_value)
+            for variable_name, variable_value in value.items()
+        }
+
+    @field_validator("env")
+    @classmethod
+    def validate_environment_names(cls, value: dict[str, str]) -> dict[str, str]:
+        """Validate the names of the environment variables.
+
+        Args:
+            value: Configured environment variables.
+
+        Returns:
+            The validated environment variables.
+
+        Raises:
+            ValueError: If a name is empty, contains "=" or uses the reserved prefix.
+        """
+        for variable_name in value:
+            if not variable_name or "=" in variable_name:
+                raise ValueError(
+                    f"Invalid environment variable name '{variable_name}', it must not be empty or contain '='"
+                )
+
+            # Environment variable names are case-insensitive on Windows
+            if variable_name.upper().startswith(RESERVED_ENVIRONMENT_PREFIX):
+                raise ValueError(
+                    f"The environment variable '{variable_name}' is reserved, names starting with '{RESERVED_ENVIRONMENT_PREFIX}' are set by PowerRules"
+                )
+
+        return value
+
+    @field_validator("timeout")
+    @classmethod
+    def validate_timeout(cls, value: float | None) -> float | None:
+        """Validate that the timeout is positive.
+
+        Args:
+            value: Configured timeout in seconds, or None for no time limit.
+
+        Returns:
+            The validated timeout.
+
+        Raises:
+            ValueError: If the timeout is not greater than zero.
+        """
+        # "not value > 0" also rejects NaN
+        if value is not None and not value > 0:
+            raise ValueError(
+                "'timeout' must be greater than zero (use null for no time limit)"
+            )
+
+        return value
+
+    @model_validator(mode="after")
+    def validate_background_options(self) -> "ActionConfiguration":
+        """Validate that options which need a finished command are not combined with 'wait: false'.
+
+        Without waiting there is neither an exit code nor a point in time at which the timeout could apply.
+        Only explicitly configured options are rejected, not the defaults.
+
+        Returns:
+            The validated configuration.
+
+        Raises:
+            ValueError: If 'timeout' or 'success_exit_codes' is configured together with 'wait: false'.
+        """
+        if self.wait:
+            return self
+
+        conflicting_options = sorted(
+            {"timeout", "success_exit_codes"} & self.model_fields_set
+        )
+
+        if conflicting_options:
+            option_names = ", ".join(f"'{name}'" for name in conflicting_options)
+
+            raise ValueError(
+                f"{option_names} cannot be combined with 'wait: false' because the command is not waited for"
+            )
+
+        return self
 
 
 class RuleConfiguration(BaseModel):
@@ -380,7 +540,7 @@ class RuleConfiguration(BaseModel):
     name: str
     enabled: StrictBool = True
     conditions: ConditionConfiguration
-    action: ActionConfiguration
+    actions: list[ActionConfiguration] = Field(min_length=1)
 
 
 class RuleSetConfiguration(BaseModel):
@@ -537,5 +697,26 @@ def _match_enum_case_insensitive(enum_type: type[EnumType], value: object) -> ob
     for member in enum_type:
         if member.value.casefold() == value.casefold():
             return member
+
+    return value
+
+
+def _convert_environment_value(value: object) -> object:
+    """Convert a number or boolean of an environment variable to its string form.
+
+    Booleans use the YAML spelling ("true" and "false") instead of the Python one.
+
+    Args:
+        value: Configured value of an environment variable.
+
+    Returns:
+        The converted string, or the unchanged value if it is neither a number nor a boolean.
+    """
+    # A bool is also an int, so it has to be checked first
+    if isinstance(value, bool):
+        return "true" if value else "false"
+
+    if isinstance(value, int | float):
+        return str(value)
 
     return value

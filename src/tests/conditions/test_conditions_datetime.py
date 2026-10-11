@@ -9,7 +9,7 @@ from powerrules.conditions.datetime import (
     TimeRange,
     Weekday,
 )
-from tests.dummies import Dummy_ClockProvider
+from tests.mocks import make_clock_provider
 
 #################
 # TimeRange tests
@@ -172,7 +172,8 @@ def test_datetime_range_from_midnight_to_midnight_covers_exactly_one_day(
 
 def test_datetime_condition_matches_current_datetime_in_datetime_range() -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 23, 30)),
+        # clock_provider=make_clock_provider(datetime(2026, 8, 21, 23, 30)),
+        clock_provider=make_clock_provider(datetime(2026, 8, 21, 23, 30)),
         datetime_range=DateTimeRange(
             start=datetime(2026, 8, 21, 18, 0),
             end=datetime(2026, 8, 22, 6, 0),
@@ -186,7 +187,7 @@ def test_datetime_condition_does_not_match_current_datetime_outside_datetime_ran
     None
 ):
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        clock_provider=make_clock_provider(datetime(2026, 8, 21, 12, 0)),
         datetime_range=DateTimeRange(
             start=datetime(2026, 8, 21, 18, 0),
             end=datetime(2026, 8, 22, 6, 0),
@@ -212,7 +213,7 @@ def test_datetime_condition_uses_current_weekday_for_datetime_range(
     expected: bool,
 ) -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(current_datetime),
+        clock_provider=make_clock_provider(current_datetime),
         datetime_range=DateTimeRange(
             start=datetime(2026, 8, 21, 18, 0),
             end=datetime(2026, 8, 22, 6, 0),
@@ -228,7 +229,7 @@ def test_datetime_condition_does_not_match_configured_weekday_outside_datetime_r
 ):
     # 2026-08-28 is a Friday as well, but it is not within the range
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 28, 22, 0)),
+        clock_provider=make_clock_provider(datetime(2026, 8, 28, 22, 0)),
         datetime_range=DateTimeRange(
             start=datetime(2026, 8, 21, 18, 0),
             end=datetime(2026, 8, 22, 6, 0),
@@ -242,7 +243,7 @@ def test_datetime_condition_does_not_match_configured_weekday_outside_datetime_r
 def test_datetime_condition_requires_at_least_one_criterion() -> None:
     with pytest.raises(ValueError, match="at least one"):
         DateTimeCondition(
-            clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+            clock_provider=make_clock_provider(datetime(2026, 8, 21, 12, 0)),
         )
 
 
@@ -252,7 +253,7 @@ def test_datetime_condition_requires_at_least_one_criterion() -> None:
 
 
 def test_datetime_condition_matches_current_time_in_range() -> None:
-    clock_provider = Dummy_ClockProvider(
+    clock_provider = make_clock_provider(
         datetime(2026, 8, 21, 23, 30),
     )
 
@@ -268,7 +269,7 @@ def test_datetime_condition_matches_current_time_in_range() -> None:
 
 
 def test_datetime_condition_does_not_match_current_time_outside_range() -> None:
-    clock_provider = Dummy_ClockProvider(
+    clock_provider = make_clock_provider(
         datetime(2026, 8, 21, 12, 0),
     )
 
@@ -284,7 +285,7 @@ def test_datetime_condition_does_not_match_current_time_outside_range() -> None:
 
 
 def test_datetime_condition_matches_configured_weekday() -> None:
-    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0))
+    clock_provider = make_clock_provider(datetime(2026, 8, 21, 12, 0))
 
     condition = DateTimeCondition(
         clock_provider=clock_provider,
@@ -295,7 +296,7 @@ def test_datetime_condition_matches_configured_weekday() -> None:
 
 
 def test_datetime_condition_does_not_match_unconfigured_weekday() -> None:
-    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0))
+    clock_provider = make_clock_provider(datetime(2026, 8, 21, 12, 0))
 
     condition = DateTimeCondition(
         clock_provider=clock_provider,
@@ -306,7 +307,7 @@ def test_datetime_condition_does_not_match_unconfigured_weekday() -> None:
 
 
 def test_datetime_condition_matches_one_of_multiple_weekdays() -> None:
-    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0))
+    clock_provider = make_clock_provider(datetime(2026, 8, 21, 12, 0))
 
     condition = DateTimeCondition(
         clock_provider=clock_provider,
@@ -325,7 +326,7 @@ def test_datetime_condition_matches_one_of_multiple_weekdays() -> None:
 def test_datetime_condition_does_not_match_when_current_weekday_is_not_configured() -> (
     None
 ):
-    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0))
+    clock_provider = make_clock_provider(datetime(2026, 8, 21, 12, 0))
 
     condition = DateTimeCondition(
         clock_provider=clock_provider,
@@ -341,7 +342,7 @@ def test_datetime_condition_does_not_match_when_current_weekday_is_not_configure
 
 
 def test_datetime_condition_matches_time_and_weekday() -> None:
-    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 23, 30))
+    clock_provider = make_clock_provider(datetime(2026, 8, 21, 23, 30))
 
     condition = DateTimeCondition(
         clock_provider=clock_provider,
@@ -358,7 +359,7 @@ def test_datetime_condition_matches_time_and_weekday() -> None:
 def test_datetime_condition_does_not_match_when_time_matches_but_weekday_does_not() -> (
     None
 ):
-    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 23, 30))
+    clock_provider = make_clock_provider(datetime(2026, 8, 21, 23, 30))
 
     condition = DateTimeCondition(
         clock_provider=clock_provider,
@@ -375,7 +376,7 @@ def test_datetime_condition_does_not_match_when_time_matches_but_weekday_does_no
 def test_datetime_condition_does_not_match_when_weekday_matches_but_time_does_not() -> (
     None
 ):
-    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0))
+    clock_provider = make_clock_provider(datetime(2026, 8, 21, 12, 0))
 
     condition = DateTimeCondition(
         clock_provider=clock_provider,
@@ -391,7 +392,7 @@ def test_datetime_condition_does_not_match_when_weekday_matches_but_time_does_no
 
 # Special case: The time range crosses midnight, so the weekday refers to the day on which the range starts
 def test_datetime_condition_uses_start_weekday_for_range_crossing_midnight() -> None:
-    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 23, 30))
+    clock_provider = make_clock_provider(datetime(2026, 8, 21, 23, 30))
 
     condition = DateTimeCondition(
         clock_provider=clock_provider,
@@ -406,16 +407,16 @@ def test_datetime_condition_uses_start_weekday_for_range_crossing_midnight() -> 
     assert condition.evaluate() is True
 
     # Saturday 01:00 belongs to the range which started on Friday
-    clock_provider.now = lambda: datetime(2026, 8, 22, 1, 0)
+    clock_provider.now.return_value = datetime(2026, 8, 22, 1, 0)
     assert condition.evaluate() is True
 
     # Friday 01:00 belongs to the range which started on Thursday
-    clock_provider.now = lambda: datetime(2026, 8, 21, 1, 0)
+    clock_provider.now.return_value = datetime(2026, 8, 21, 1, 0)
     assert condition.evaluate() is False
 
 
 def test_datetime_condition_raises_error_when_no_criteria_specified() -> None:
-    clock_provider = Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0))
+    clock_provider = make_clock_provider(datetime(2026, 8, 21, 12, 0))
 
     with pytest.raises(ValueError):
         DateTimeCondition(clock_provider=clock_provider)
@@ -446,7 +447,7 @@ def test_datetime_condition_uses_start_weekday_at_range_boundaries(
     expected: bool,
 ) -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(current_datetime),
+        clock_provider=make_clock_provider(current_datetime),
         time_range=TimeRange(
             start=time(22, 0),
             end=time(6, 0),
@@ -470,7 +471,7 @@ def test_datetime_condition_range_ending_at_midnight_stays_within_start_day(
     expected: bool,
 ) -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(current_datetime),
+        clock_provider=make_clock_provider(current_datetime),
         time_range=TimeRange(
             start=time(22, 0),
             end=time(0, 0),
@@ -494,7 +495,7 @@ def test_datetime_condition_does_not_shift_weekday_for_range_within_one_day(
     expected: bool,
 ) -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        clock_provider=make_clock_provider(datetime(2026, 8, 21, 12, 0)),
         time_range=TimeRange(
             start=time(10, 0),
             end=time(18, 0),
@@ -512,7 +513,7 @@ def test_datetime_condition_does_not_shift_weekday_for_range_within_one_day(
 
 def test_datetime_condition_matches_configured_month() -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        clock_provider=make_clock_provider(datetime(2026, 8, 21, 12, 0)),
         months=frozenset({Month.AUGUST}),
     )
 
@@ -521,7 +522,7 @@ def test_datetime_condition_matches_configured_month() -> None:
 
 def test_datetime_condition_does_not_match_unconfigured_month() -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        clock_provider=make_clock_provider(datetime(2026, 8, 21, 12, 0)),
         months=frozenset({Month.SEPTEMBER}),
     )
 
@@ -530,7 +531,7 @@ def test_datetime_condition_does_not_match_unconfigured_month() -> None:
 
 def test_datetime_condition_matches_one_of_multiple_months() -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        clock_provider=make_clock_provider(datetime(2026, 8, 21, 12, 0)),
         months=frozenset({Month.JULY, Month.AUGUST, Month.SEPTEMBER}),
     )
 
@@ -555,7 +556,7 @@ def test_datetime_condition_month_boundaries(
     expected: bool,
 ) -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(current_datetime),
+        clock_provider=make_clock_provider(current_datetime),
         months=frozenset({Month.AUGUST}),
     )
 
@@ -568,7 +569,7 @@ def test_datetime_condition_maps_every_month_number_to_its_month(
     month_number: int,
     month: Month,
 ) -> None:
-    clock_provider = Dummy_ClockProvider(datetime(2026, month_number, 15, 12, 0))
+    clock_provider = make_clock_provider(datetime(2026, month_number, 15, 12, 0))
 
     matching_condition = DateTimeCondition(
         clock_provider=clock_provider,
@@ -598,7 +599,7 @@ def test_datetime_condition_requires_weekday_and_month_to_match(
     expected: bool,
 ) -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(datetime(2026, 8, 21, 12, 0)),
+        clock_provider=make_clock_provider(datetime(2026, 8, 21, 12, 0)),
         weekdays=frozenset({weekday}),
         months=frozenset({month}),
     )
@@ -627,7 +628,7 @@ def test_datetime_condition_uses_start_month_for_range_crossing_midnight(
     expected: bool,
 ) -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(current_datetime),
+        clock_provider=make_clock_provider(current_datetime),
         time_range=TimeRange(
             start=time(23, 0),
             end=time(1, 30),
@@ -651,7 +652,7 @@ def test_datetime_condition_uses_current_month_for_datetime_range(
     expected: bool,
 ) -> None:
     condition = DateTimeCondition(
-        clock_provider=Dummy_ClockProvider(current_datetime),
+        clock_provider=make_clock_provider(current_datetime),
         datetime_range=DateTimeRange(
             start=datetime(2026, 11, 30, 23, 0),
             end=datetime(2026, 12, 1, 2, 0),

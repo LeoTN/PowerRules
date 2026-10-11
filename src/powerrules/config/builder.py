@@ -1,12 +1,7 @@
 from datetime import datetime, time
+from pathlib import Path
 
-from powerrules.actions.base import Action
-from powerrules.actions.power import (
-    HibernateAction,
-    RebootAction,
-    ShutdownAction,
-    SleepAction,
-)
+from powerrules.actions.command import CommandAction
 from powerrules.conditions.base import Condition
 from powerrules.conditions.datetime import DateTimeCondition, DateTimeRange, TimeRange
 from powerrules.conditions.operators import AndCondition, NotCondition, OrCondition
@@ -27,7 +22,7 @@ from powerrules.config.models import (
 from powerrules.engine.exceptions import ConfigurationError
 from powerrules.engine.models import Rule, RuleSet
 from powerrules.providers.clock import ClockProvider
-from powerrules.providers.power import PowerProvider
+from powerrules.providers.command import CommandProvider
 from powerrules.providers.process import ProcessProvider
 from powerrules.providers.window import WindowProvider
 
@@ -37,13 +32,25 @@ class ConfigurationBuilder:
         self,
         clock_provider: ClockProvider,
         process_provider: ProcessProvider,
-        power_provider: PowerProvider,
+        command_provider: CommandProvider,
         window_provider: WindowProvider,
+        base_directory: Path,
     ):
+        """Create a builder for the rules of one policy.
+
+        Args:
+            clock_provider: Provider for the current date and time.
+            process_provider: Provider for the existing processes.
+            command_provider: Provider which runs the commands of the actions.
+            window_provider: Provider for the existing windows.
+            base_directory: Directory of the policy file. Commands run there by default,
+                and relative working directories of actions are resolved against it.
+        """
         self.clock_provider = clock_provider
         self.process_provider = process_provider
-        self.power_provider = power_provider
+        self.command_provider = command_provider
         self.window_provider = window_provider
+        self.base_directory = base_directory
 
     def build(self, configuration: RuleSetConfiguration) -> RuleSet:
         """Build a rule set from the validated configuration. This allows the rule engine to process the rules.
@@ -72,11 +79,23 @@ class ConfigurationBuilder:
         Returns:
             The executable rule.
         """
+        action_count = len(rule_configuration.actions)
+
         return Rule(
             name=rule_configuration.name,
             enabled=rule_configuration.enabled,
             condition=self._build_condition(rule_configuration.conditions),
-            action=self._build_action(rule_configuration.action),
+            actions=tuple(
+                self._build_action(
+                    action_configuration,
+                    rule_name=rule_configuration.name,
+                    position=position,
+                    action_count=action_count,
+                )
+                for position, action_configuration in enumerate(
+                    rule_configuration.actions, start=1
+                )
+            ),
         )
 
     def _build_condition(
@@ -212,23 +231,45 @@ class ConfigurationBuilder:
             case_sensitive=configuration.match.case_sensitive,
         )
 
-    def _build_action(self, configuration: ActionConfiguration) -> Action:
+    def _build_action(
+        self,
+        configuration: ActionConfiguration,
+        rule_name: str,
+        position: int,
+        action_count: int,
+    ) -> CommandAction:
         """Build an action from its configuration.
 
         Args:
-            configuration: Action configuration.
+            configuration: Configuration of the action.
+            rule_name: Name of the rule the action belongs to.
+            position: Position of the action within its rule, starting at 1.
+            action_count: Number of actions of the rule.
 
         Returns:
             The executable action.
         """
-        match configuration.type:
-            case "shutdown":
-                return ShutdownAction(self.power_provider)
-            case "sleep":
-                return SleepAction(self.power_provider)
-            case "hibernate":
-                return HibernateAction(self.power_provider)
-            case "reboot":
-                return RebootAction(self.power_provider)
+        # An absolute working directory replaces the base directory when the paths are joined
+        working_directory = (
+            self.base_directory / configuration.working_directory
+            if configuration.working_directory is not None
+            else self.base_directory
+        )
 
-        raise ConfigurationError(f"Unsupported action type '{configuration.type}'")
+        return CommandAction(
+            command_provider=self.command_provider,
+            command=configuration.run,
+            working_directory=working_directory,
+            name=(
+                configuration.name
+                if configuration.name is not None
+                else f"Action {position} of {action_count}"
+            ),
+            rule_name=rule_name,
+            shell=configuration.shell,
+            environment=configuration.env,
+            timeout=configuration.timeout,
+            success_exit_codes=configuration.success_exit_codes,
+            wait=configuration.wait,
+            continue_on_error=configuration.continue_on_error,
+        )

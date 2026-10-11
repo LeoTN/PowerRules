@@ -1,4 +1,5 @@
 import itertools
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -12,12 +13,17 @@ from powerrules.application.runtime import (
 from powerrules.engine.exceptions import ConditionEvaluationError
 from powerrules.engine.models import Rule, RuleEvaluationResult, RuleSet
 from powerrules.platform.clock import SystemClockProvider
-from powerrules.platform.linux.power import LinuxPowerProvider
-from powerrules.platform.macos.power import MacOSPowerProvider
+from powerrules.platform.command import SubprocessCommandProvider
 from powerrules.platform.process import PsUtilProcessProvider
-from powerrules.platform.windows.power import WindowsPowerProvider
-from powerrules.platform.windows.window import WindowsWindowProvider
-from tests.dummies import Dummy_Action, Dummy_Condition
+from powerrules.providers.command import Shell
+from tests.mocks import (
+    make_action,
+    make_clock_provider,
+    make_command_provider,
+    make_condition,
+    make_process_provider,
+    make_window_provider,
+)
 
 #########################
 # PowerRulesRuntime tests
@@ -34,10 +40,10 @@ def test_runtime_run_once_evaluates_configuration(
 
     # It does not really matter which platform provider is mocked here
     providers = PlatformProviders(
-        clock=Mock(spec=SystemClockProvider),
-        process=Mock(spec=PsUtilProcessProvider),
-        window=Mock(spec=WindowsWindowProvider),
-        power=Mock(spec=WindowsPowerProvider),
+        clock=make_clock_provider(datetime(2026, 8, 22, 12, 0)),
+        process=make_process_provider(),
+        window=make_window_provider(),
+        command=make_command_provider(),
     )
 
     with (
@@ -71,7 +77,8 @@ def test_runtime_run_once_evaluates_configuration(
         clock_provider=providers.clock,
         process_provider=providers.process,
         window_provider=providers.window,
-        power_provider=providers.power,
+        command_provider=providers.command,
+        base_directory=configuration_file.parent,
     )
 
     mock_builder.return_value.build.assert_called_once_with(
@@ -113,8 +120,8 @@ def test_runtime_run_continuously_threads_previous_matched_rule_between_evaluati
 ):
     rule = Rule(
         name="Test rule",
-        condition=Dummy_Condition(given_result=True),
-        action=Dummy_Action(),
+        condition=make_condition(),
+        actions=(make_action(),),
     )
 
     rule_engine = Mock()
@@ -165,8 +172,8 @@ def test_runtime_run_continuously_threads_previous_matched_rule_between_evaluati
 def test_runtime_run_continuously_stops_after_match_when_enabled() -> None:
     rule = Rule(
         name="Test rule",
-        condition=Dummy_Condition(given_result=True),
-        action=Dummy_Action(),
+        condition=make_condition(),
+        actions=(make_action(),),
     )
 
     rule_engine = Mock()
@@ -199,8 +206,8 @@ def test_runtime_run_continuously_stops_after_match_when_enabled() -> None:
 def test_runtime_run_continuously_does_not_stop_after_match_when_disabled() -> None:
     rule = Rule(
         name="Test rule",
-        condition=Dummy_Condition(given_result=True),
-        action=Dummy_Action(),
+        condition=make_condition(),
+        actions=(make_action(),),
     )
 
     rule_engine = Mock()
@@ -315,10 +322,10 @@ def test_runtime_builds_rule_engine_with_platform_providers(
 
     # It does not really matter which platform provider is mocked here
     providers = PlatformProviders(
-        clock=Mock(spec=SystemClockProvider),
-        process=Mock(spec=PsUtilProcessProvider),
-        window=Mock(spec=WindowsWindowProvider),
-        power=Mock(spec=WindowsPowerProvider),
+        clock=make_clock_provider(datetime(2026, 8, 22, 12, 0)),
+        process=make_process_provider(),
+        window=make_window_provider(),
+        command=make_command_provider(),
     )
 
     with (
@@ -351,7 +358,8 @@ def test_runtime_builds_rule_engine_with_platform_providers(
         clock_provider=providers.clock,
         process_provider=providers.process,
         window_provider=providers.window,
-        power_provider=providers.power,
+        command_provider=providers.command,
+        base_directory=configuration_file.parent,
     )
 
     mock_builder.return_value.build.assert_called_once_with(
@@ -378,7 +386,8 @@ def test_get_platform_providers_returns_windows_providers() -> None:
     assert isinstance(providers, PlatformProviders)
     assert isinstance(providers.clock, SystemClockProvider)
     assert isinstance(providers.process, PsUtilProcessProvider)
-    assert isinstance(providers.power, WindowsPowerProvider)
+    assert isinstance(providers.command, SubprocessCommandProvider)
+    assert providers.command.default_shell is Shell.POWERSHELL
 
 
 def test_get_platform_providers_returns_linux_providers() -> None:
@@ -391,7 +400,8 @@ def test_get_platform_providers_returns_linux_providers() -> None:
     assert isinstance(providers, PlatformProviders)
     assert isinstance(providers.clock, SystemClockProvider)
     assert isinstance(providers.process, PsUtilProcessProvider)
-    assert isinstance(providers.power, LinuxPowerProvider)
+    assert isinstance(providers.command, SubprocessCommandProvider)
+    assert providers.command.default_shell is Shell.SH
 
 
 def test_get_platform_providers_returns_macos_providers() -> None:
@@ -404,7 +414,8 @@ def test_get_platform_providers_returns_macos_providers() -> None:
     assert isinstance(providers, PlatformProviders)
     assert isinstance(providers.clock, SystemClockProvider)
     assert isinstance(providers.process, PsUtilProcessProvider)
-    assert isinstance(providers.power, MacOSPowerProvider)
+    assert isinstance(providers.command, SubprocessCommandProvider)
+    assert providers.command.default_shell is Shell.SH
 
 
 def test_get_platform_providers_rejects_unsupported_platform() -> None:

@@ -30,24 +30,25 @@ class RuleEngine:
         previous_matched_rule: Rule | None = None,
         dry_run: bool = False,
     ) -> RuleEvaluationResult:
-        """Evaluate rules and execute the action of a newly matching rule.
+        """Evaluate rules and execute the actions of a newly matching rule.
 
         A match is considered "new" if a rule matches and it is not the same rule as "previous_matched_rule".
-        This lets repeated calls (e.g. from a polling loop) trigger the action only once per state change,
+        This lets repeated calls (e.g. from a polling loop) trigger the actions only once per state change,
         instead of on every call while the same rule keeps matching.
 
         Args:
             previous_matched_rule: The rule that matched on the previous evaluation, if any.
                 Defaults to None, so any match is considered new.
-            dry_run: If True, determine whether the action would trigger without actually executing it.
+            dry_run: If True, determine whether the actions would trigger without actually executing them.
 
         Returns:
-            The result of the rule evaluation, including whether the action was
+            The result of the rule evaluation, including whether the actions were
             (or, in a dry run, would have been) triggered.
 
         Raises:
             ConditionEvaluationError: If a condition cannot be evaluated.
-            ActionExecutionError: If a matching action cannot be executed.
+            ActionExecutionError: If an action of a matching rule cannot be executed.
+                The remaining actions of the rule are skipped.
         """
         matched_rule = self.find_match()
         action_triggered = False
@@ -56,8 +57,9 @@ class RuleEngine:
             action_triggered = True
 
             if not dry_run:
-                # Execute the action, e.g. reboot or shutdown etc.
-                matched_rule.action.execute()
+                # Execute the actions in order, e.g. run a script and shut down afterwards
+                for action in matched_rule.actions:
+                    action.execute()
 
         return RuleEvaluationResult(
             matched_rule=matched_rule,

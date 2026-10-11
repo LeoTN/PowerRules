@@ -7,7 +7,10 @@ import typer
 from rich.markup import escape
 
 from powerrules.application.logging import LogLevel, configure_logging, console
-from powerrules.application.runtime import PowerRulesRuntime, describe_action
+from powerrules.application.runtime import (
+    PowerRulesRuntime,
+    describe_actions,
+)
 from powerrules.cli.errors import cli_command
 from powerrules.config.loader import ConfigurationLoader
 
@@ -55,7 +58,7 @@ LogLevelFileOption = Annotated[
 # Main application
 app = typer.Typer(
     name="pwru",
-    help="A rule-based computer power state management tool.",
+    help="A rule-based command automation tool.",
     no_args_is_help=True,
 )
 
@@ -88,24 +91,23 @@ def main(
         callback=version_callback,
         is_eager=True,
     ),
-    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
-    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
-    log_level_file: LogLevelFileOption = None,
 ) -> None:
-    """A rule-based computer power state management tool."""
-    configure_logging(
-        console_level=log_level,
-        log_file=log_file,
-        file_level=log_level_file,
-    )
+    """A rule-based command automation tool."""
 
 
 @policy_app.command("validate")
 @cli_command
 def validate(
     policy: PolicyOption = DEFAULT_POLICY_PATH,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
+    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
+    log_level_file: LogLevelFileOption = None,
 ) -> None:
     """Validate a PowerRules policy file."""
+    configure_logging(
+        console_level=log_level, log_file=log_file, file_level=log_level_file
+    )
+
     ConfigurationLoader().load(policy)
 
     # Theoretically, one could inject markdown via the file path
@@ -116,8 +118,15 @@ def validate(
 @cli_command
 def show(
     policy: PolicyOption = DEFAULT_POLICY_PATH,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
+    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
+    log_level_file: LogLevelFileOption = None,
 ) -> None:
     """Display the configured rules of a PowerRules policy."""
+    configure_logging(
+        console_level=log_level, log_file=log_file, file_level=log_level_file
+    )
+
     policy_configuration = ConfigurationLoader().load(policy)
 
     for index, rule in enumerate(policy_configuration.rules, start=1):
@@ -149,8 +158,15 @@ def run(
         help="Evaluate the policy without executing any matching action.",
     ),
     policy: PolicyOption = DEFAULT_POLICY_PATH,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
+    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
+    log_level_file: LogLevelFileOption = None,
 ) -> None:
     """Evaluate a PowerRules policy continuously or once."""
+    configure_logging(
+        console_level=log_level, log_file=log_file, file_level=log_level_file
+    )
+
     runtime = PowerRulesRuntime()
 
     if once:
@@ -161,12 +177,12 @@ def run(
             logger.info("No rule matched")
         elif dry_run:
             logger.info(
-                f"[DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed action: {describe_action(result.matched_rule.action)}"
+                f"[DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed actions: {describe_actions(result.matched_rule)}"
             )
         # Technically, the system could already be shut down at this point, but this usually takes a few seconds
         else:
             logger.info(
-                f"Rule '{result.matched_rule.name}' matched, executed action: {describe_action(result.matched_rule.action)}"
+                f"Rule '{result.matched_rule.name}' matched, executed actions: {describe_actions(result.matched_rule)}"
             )
 
         return
@@ -185,12 +201,12 @@ def run(
 
         if dry_run:
             logger.info(
-                f"[DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed action: {describe_action(result.matched_rule.action)}"
+                f"[DRY RUN] Rule '{result.matched_rule.name}' matched, would have executed actions: {describe_actions(result.matched_rule)}"
             )
         # Technically, the system could already be shut down at this point, but this usually takes a few seconds
         else:
             logger.info(
-                f"Rule '{result.matched_rule.name}' matched, executed action: {describe_action(result.matched_rule.action)}"
+                f"Rule '{result.matched_rule.name}' matched, executed actions: {describe_actions(result.matched_rule)}"
             )
 
         if stop_on_match:
