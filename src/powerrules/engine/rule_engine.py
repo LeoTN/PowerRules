@@ -49,6 +49,7 @@ class RuleEngine:
             ConditionEvaluationError: If a condition cannot be evaluated.
             ActionExecutionError: If an action of a matching rule cannot be executed.
                 The remaining actions of the rule are skipped.
+            FileIntegrityError: If trust is required and a trusted file cannot be read, is not trusted yet or was modified.
         """
         matched_rule = self.find_match()
         action_triggered = False

@@ -1,7 +1,7 @@
 from datetime import datetime, time
 from pathlib import Path
 
-from powerrules.actions.command import CommandAction
+from powerrules.actions.command import CommandAction, FilesVerifier
 from powerrules.conditions.base import Condition
 from powerrules.conditions.datetime import DateTimeCondition, DateTimeRange, TimeRange
 from powerrules.conditions.operators import AndCondition, NotCondition, OrCondition
@@ -35,6 +35,7 @@ class ConfigurationBuilder:
         command_provider: CommandProvider,
         window_provider: WindowProvider,
         base_directory: Path,
+        files_verifier: FilesVerifier | None = None,
     ):
         """Create a builder for the rules of one policy.
 
@@ -45,12 +46,14 @@ class ConfigurationBuilder:
             window_provider: Provider for the existing windows.
             base_directory: Directory of the policy file. Commands run there by default,
                 and relative working directories of actions are resolved against it.
+            files_verifier: Called with the trusted files before an action runs. None skips the verification.
         """
         self.clock_provider = clock_provider
         self.process_provider = process_provider
         self.command_provider = command_provider
         self.window_provider = window_provider
         self.base_directory = base_directory
+        self.files_verifier = files_verifier
 
     def build(self, configuration: RuleSetConfiguration) -> RuleSet:
         """Build a rule set from the validated configuration. This allows the rule engine to process the rules.
@@ -272,4 +275,9 @@ class ConfigurationBuilder:
             success_exit_codes=configuration.success_exit_codes,
             wait=configuration.wait,
             continue_on_error=configuration.continue_on_error,
+            # Not resolved here, the verifier resolves symbolic links on every check
+            trusted_files=tuple(
+                self.base_directory / file for file in configuration.trusted_files
+            ),
+            files_verifier=self.files_verifier,
         )

@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 
 from powerrules.engine.exceptions import ActionExecutionError
@@ -11,6 +11,9 @@ from powerrules.providers.command import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Verifies the given trusted files right before a command runs and raises an error if they must not be used
+FilesVerifier = Callable[[Sequence[Path]], None]
 
 # Time in seconds a command may run before it is terminated
 DEFAULT_ACTION_TIMEOUT_SECONDS = 60
@@ -38,6 +41,8 @@ class CommandAction:
         success_exit_codes: Collection[int] = (0,),
         wait: bool = True,
         continue_on_error: bool = False,
+        trusted_files: Sequence[Path] = (),
+        files_verifier: FilesVerifier | None = None,
     ):
         """Create an action which runs a command in a shell.
 
@@ -53,6 +58,9 @@ class CommandAction:
             success_exit_codes: Exit codes which count as success.
             wait: Whether to wait for the command to finish. If False, the timeout and the exit codes are ignored.
             continue_on_error: Whether a failure is only logged instead of raised.
+            trusted_files: Absolute paths of the files the command depends on, they are verified before every run.
+            files_verifier: Called with the trusted files before every run, it raises an error if they must not be used.
+                None skips the verification.
         """
         self.command_provider = command_provider
         self.command = command
@@ -65,16 +73,24 @@ class CommandAction:
         self.success_exit_codes = frozenset(success_exit_codes)
         self.wait = wait
         self.continue_on_error = continue_on_error
+        self.trusted_files = tuple(trusted_files)
+        self.files_verifier = files_verifier
 
     def execute(self) -> None:
         """Run the command.
 
-        If the action is configured with "continue_on_error", a failure is only logged as a warning.
+        The trusted files are verified first. If the action is configured with "continue_on_error",
+        a failure of the command is only logged as a warning.
 
         Raises:
+            FileIntegrityError: If trust is required and a trusted file cannot be read, is not trusted yet or was modified.
             ActionExecutionError: If the command cannot be started, exceeds the timeout
                 or finishes with an exit code which does not count as success.
         """
+        # Outside of the try block on purpose: "continue_on_error" must never skip a failed integrity check
+        if self.files_verifier is not None and self.trusted_files:
+            self.files_verifier(self.trusted_files)
+
         logger.info(f"Running action '{self.name}'")
         # The command is only logged on debug level, because it might contain secrets
         logger.debug(f"Command of action '{self.name}': {self.command.strip()}")

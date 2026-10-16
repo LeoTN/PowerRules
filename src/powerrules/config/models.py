@@ -389,6 +389,8 @@ class ActionConfiguration(BaseModel):
     )
     wait: StrictBool = True
     continue_on_error: StrictBool = False
+    # Files (e.g. scripts) the command depends on, relative paths are resolved against the directory of the policy
+    trusted_files: list[Path] = Field(default_factory=list)
 
     @field_validator("run", "name")
     @classmethod
@@ -531,6 +533,29 @@ class ActionConfiguration(BaseModel):
 
         return self
 
+    @field_validator("trusted_files", mode="before")
+    @classmethod
+    def validate_trusted_files_not_blank(cls, value: object) -> object:
+        """Validate that no configured trusted file is blank.
+
+        An empty string would otherwise silently become the directory of the policy.
+
+        Args:
+            value: Configured trusted files.
+
+        Returns:
+            The unchanged value, so the regular validation converts it to paths.
+
+        Raises:
+            ValueError: If a trusted file is a blank string.
+        """
+        if isinstance(value, list) and any(
+            isinstance(item, str) and not item.strip() for item in value
+        ):
+            raise ValueError("The 'trusted_files' entries must not be blank")
+
+        return value
+
 
 class RuleConfiguration(BaseModel):
     """Configuration for a single rule."""
@@ -549,6 +574,20 @@ class RuleSetConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rules: list[RuleConfiguration]
+
+    def get_trusted_files(self) -> tuple[Path, ...]:
+        """Return the trusted files of all rules, including the disabled ones.
+
+        Returns:
+            The configured paths in the order of the policy. Relative paths are not resolved
+            and duplicates are not removed, see "resolve_trusted_files()".
+        """
+        return tuple(
+            file
+            for rule in self.rules
+            for action in rule.actions
+            for file in action.trusted_files
+        )
 
 
 def _parse_date(value: object) -> date:

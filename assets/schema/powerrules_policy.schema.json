@@ -396,6 +396,14 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Whether the remaining actions of the rule are still executed if this action fails."
+                },
+                "trusted_files": {
+                    "type": "array",
+                    "description": "Files (e.g. scripts) the command depends on. Relative paths are resolved against the directory of the policy file. Their digests are stored by 'policy trust' and verified before every run of the action.",
+                    "items": {
+                        "type": "string",
+                        "pattern": "\\S"
+                    }
                 }
             },
             "if": {

@@ -11,8 +11,19 @@ from powerrules.application.runtime import (
     PowerRulesRuntime,
     describe_actions,
 )
+from powerrules.application.trust import trust_policy
 from powerrules.cli.errors import cli_command
+from powerrules.cli.trust_output import (
+    create_trust_checker,
+    print_trust_reports,
+    report_trust,
+)
 from powerrules.config.loader import ConfigurationLoader
+from powerrules.platform.clock import SystemClockProvider
+from powerrules.trust.report import build_entry_report
+from powerrules.trust.store import (
+    TrustStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +66,7 @@ LogLevelFileOption = Annotated[
     ),
 ]
 
+
 # Main application
 app = typer.Typer(
     name="pwru",
@@ -69,7 +81,15 @@ policy_app = typer.Typer(
     no_args_is_help=True,
 )
 
+# Trust subcommand
+trust_app = typer.Typer(
+    name="trust",
+    help="Manage which policies are trusted.",
+    no_args_is_help=True,
+)
+
 app.add_typer(policy_app, name="policy")
+app.add_typer(trust_app, name="trust")
 
 
 def version_callback(value: bool) -> None:
@@ -108,7 +128,10 @@ def validate(
         console_level=log_level, log_file=log_file, file_level=log_level_file
     )
 
-    ConfigurationLoader().load(policy)
+    # Validating is the step before trusting a policy, so an untrusted policy is only reported as a warning
+    ConfigurationLoader(
+        trust_checker=create_trust_checker(False, always_show_table=True)
+    ).load(policy)
 
     # Theoretically, one could inject markdown via the file path
     console.print(f"Policy '{policy}' is valid", markup=False)
@@ -157,6 +180,11 @@ def run(
         "--dry-run",
         help="Evaluate the policy without executing any matching action.",
     ),
+    no_require_trust: bool = typer.Option(
+        False,
+        "--no-require-trust",
+        help="Run the policy even if it is not trusted or was modified since it was trusted (see 'trust add').",
+    ),
     policy: PolicyOption = DEFAULT_POLICY_PATH,
     log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
     log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
@@ -167,7 +195,10 @@ def run(
         console_level=log_level, log_file=log_file, file_level=log_level_file
     )
 
-    runtime = PowerRulesRuntime()
+    # Commands are only executed without a dry run, so trust is only required then
+    runtime = PowerRulesRuntime(
+        trust_checker=create_trust_checker(not dry_run and not no_require_trust)
+    )
 
     if once:
         logger.info(f"Running policy '{policy}' once...")
@@ -211,3 +242,63 @@ def run(
 
         if stop_on_match:
             logger.info("Rule matched, stopping evaluation")
+
+
+@trust_app.command("add")
+@cli_command
+def trust_add(
+    policy: PolicyOption = DEFAULT_POLICY_PATH,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
+    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
+    log_level_file: LogLevelFileOption = None,
+) -> None:
+    """Trust a PowerRules policy file, so modifications of it can be detected."""
+    configure_logging(
+        console_level=log_level, log_file=log_file, file_level=log_level_file
+    )
+
+    report = trust_policy(policy, TrustStore(), SystemClockProvider())
+
+    console.print(f"Policy '{policy}' is now trusted", markup=False)
+    report_trust(report, always_show_table=True)
+
+
+@trust_app.command("remove")
+@cli_command
+def trust_remove(
+    policy: PolicyOption = DEFAULT_POLICY_PATH,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
+    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
+    log_level_file: LogLevelFileOption = None,
+) -> None:
+    """Remove the trust of a PowerRules policy file."""
+    configure_logging(
+        console_level=log_level, log_file=log_file, file_level=log_level_file
+    )
+
+    if TrustStore().untrust(policy):
+        console.print(f"Policy '{policy}' is no longer trusted", markup=False)
+    else:
+        console.print(f"Policy '{policy}' was not trusted", markup=False)
+
+
+@trust_app.command("list")
+@cli_command
+def trust_list(
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
+    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
+    log_level_file: LogLevelFileOption = None,
+) -> None:
+    """List all trusted policies and show their current trust status."""
+    configure_logging(
+        console_level=log_level, log_file=log_file, file_level=log_level_file
+    )
+
+    entries = TrustStore().list_entries()
+
+    if not entries:
+        console.print("No policies are trusted")
+
+        return
+
+    print_trust_reports([build_entry_report(entry) for entry in entries])

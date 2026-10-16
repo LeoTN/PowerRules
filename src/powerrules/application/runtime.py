@@ -2,6 +2,7 @@ import platform
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from powerrules.config.builder import ConfigurationBuilder
@@ -18,6 +19,7 @@ from powerrules.providers.clock import ClockProvider
 from powerrules.providers.command import CommandProvider, Shell
 from powerrules.providers.process import ProcessProvider
 from powerrules.providers.window import WindowProvider
+from powerrules.trust.checker import PolicyTrustChecker
 
 
 def describe_actions(rule: Rule) -> str:
@@ -34,6 +36,14 @@ def describe_actions(rule: Rule) -> str:
 
 class PowerRulesRuntime:
     """Coordinate PowerRules configuration loading and rule evaluation and action execution."""
+
+    def __init__(self, trust_checker: PolicyTrustChecker | None = None) -> None:
+        """Create the runtime.
+
+        Args:
+            trust_checker: Checks whether a policy is trusted before it is loaded. None skips the check.
+        """
+        self.trust_checker = trust_checker
 
     def run_once(
         self,
@@ -54,6 +64,9 @@ class PowerRulesRuntime:
         Raises:
             ConditionEvaluationError: If a condition cannot be evaluated.
             ActionExecutionError: If a matching action cannot be executed.
+            PolicyNotTrustedError: If trust is required and the policy is not trusted.
+            TrustStoreError: If trust is required and the trust store cannot be read.
+            FileIntegrityError: If trust is required and a trusted file cannot be read, is not trusted yet or was modified.
         """
         rule_engine = self._build_rule_engine(configuration_path)
 
@@ -88,6 +101,11 @@ class PowerRulesRuntime:
                 Raised immediately, before any evaluation takes place.
             ConditionEvaluationError: If a condition cannot be evaluated. Raised while iterating.
             ActionExecutionError: If a matching action cannot be executed. Raised while iterating.
+            PolicyNotTrustedError: If trust is required and the policy is not trusted.
+                Raised immediately, before any evaluation takes place.
+            TrustStoreError: If trust is required and the trust store cannot be read.
+                Raised immediately, before any evaluation takes place.
+            FileIntegrityError: If trust is required and a trusted file cannot be read, is not trusted yet or was modified.
         """
         if evaluation_interval <= 0:
             raise ValueError("Evaluation interval must be greater than zero")
@@ -140,22 +158,37 @@ class PowerRulesRuntime:
 
             time.sleep(evaluation_interval)
 
-    @staticmethod
-    def _build_rule_engine(configuration_path: Path) -> RuleEngine:
+    def _build_rule_engine(self, configuration_path: Path) -> RuleEngine:
         """Build a rule engine from a policy file.
 
-        The policy is loaded and built exactly once per invocation.
+        The policy is loaded and built exactly once per invocation. If trust is checked, the trusted files
+        of all rules are verified right away, so problems are reported at the start and not only when an action runs.
 
         Args:
             configuration_path: Path to the PowerRules policy file.
 
         Returns:
             A configured rule engine.
+
+        Raises:
+            PolicyNotTrustedError: If trust is required and the policy is not trusted.
+            FileIntegrityError: If trust is required and a trusted file cannot be read, is not trusted yet or was modified.
+            TrustStoreError: If trust is required and the trust store cannot be read.
         """
-        configuration = ConfigurationLoader().load(configuration_path)
+        configuration = ConfigurationLoader(trust_checker=self.trust_checker).load(
+            configuration_path
+        )
 
         # Fetch the correct providers for the current platform / OS
         providers = get_platform_providers()
+
+        policy_path = configuration_path.resolve()
+        # Only the policy path is bound, the action passes its own files
+        files_verifier = (
+            partial(self.trust_checker.verify_files, policy_path)
+            if self.trust_checker is not None
+            else None
+        )
 
         rule_set = ConfigurationBuilder(
             # Information about the current date and time
@@ -167,7 +200,8 @@ class PowerRulesRuntime:
             # Runs the commands of the actions
             command_provider=providers.command,
             # Commands run in the directory of the policy by default, no matter where PowerRules was started
-            base_directory=configuration_path.resolve().parent,
+            base_directory=policy_path.parent,
+            files_verifier=files_verifier,
         ).build(configuration)
 
         return RuleEngine(rule_set.rules)

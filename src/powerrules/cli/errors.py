@@ -10,12 +10,16 @@ from pydantic import ValidationError
 from powerrules.engine.exceptions import (
     ActionExecutionError,
     ConditionEvaluationError,
+    FileIntegrityError,
+    PolicyNotTrustedError,
+    TrustStoreError,
 )
 
 logger = logging.getLogger(__name__)
 
 EXIT_RUNTIME_ERROR = 1
 EXIT_POLICY_ERROR = 2
+EXIT_POLICY_TRUST_ERROR = 3
 
 ReturnType = TypeVar("ReturnType")
 
@@ -49,6 +53,15 @@ def handle_cli_error(error: Exception) -> NoReturn:
             logger.error(f"{location}: {message}")
 
         raise typer.Exit(code=EXIT_POLICY_ERROR)
+
+    # The message already explains which policy or file is affected and how to trust it
+    if isinstance(error, PolicyNotTrustedError | FileIntegrityError):
+        logger.error(str(error))
+        raise typer.Exit(code=EXIT_POLICY_TRUST_ERROR)
+
+    if isinstance(error, TrustStoreError):
+        logger.error(str(error))
+        raise typer.Exit(code=EXIT_RUNTIME_ERROR)
 
     # The existing error messages for conditions and actions
     if isinstance(error, ConditionEvaluationError):
