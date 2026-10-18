@@ -169,9 +169,9 @@ def test_command_action_copies_environment_and_exit_codes() -> None:
     assert command_provider.run.call_args.args[0].environment["CUSTOM"] == "value"
 
 
-##################
+#################
 # Exit code tests
-##################
+#################
 
 
 @pytest.mark.parametrize(
@@ -227,9 +227,9 @@ def test_command_action_lists_sorted_success_exit_codes_in_error() -> None:
     )
 
 
-#######################
+######################
 # Error handling tests
-#######################
+######################
 
 
 @pytest.mark.parametrize(("result", "error", "message"), FAILURE_CASES)

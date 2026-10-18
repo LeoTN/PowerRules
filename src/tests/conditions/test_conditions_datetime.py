@@ -165,9 +165,9 @@ def test_datetime_range_from_midnight_to_midnight_covers_exactly_one_day(
     assert datetime_range.contains(current_datetime) is expected
 
 
-#############################################
+##############################################
 # DateTimeCondition tests (absolute datetimes)
-#############################################
+##############################################
 
 
 def test_datetime_condition_matches_current_datetime_in_datetime_range() -> None:
