@@ -79,6 +79,7 @@ def test_runtime_run_once_evaluates_configuration(
         window_provider=providers.window,
         command_provider=providers.command,
         base_directory=configuration_file.parent,
+        files_verifier=None,
     )
 
     mock_builder.return_value.build.assert_called_once_with(
@@ -346,7 +347,7 @@ def test_runtime_builds_rule_engine_with_platform_providers(
         mock_loader.return_value.load.return_value = "configuration"
         mock_builder.return_value.build.return_value = rule_set
 
-        PowerRulesRuntime._build_rule_engine(
+        PowerRulesRuntime()._build_rule_engine(
             configuration_path=configuration_file,
         )
 
@@ -360,6 +361,7 @@ def test_runtime_builds_rule_engine_with_platform_providers(
         window_provider=providers.window,
         command_provider=providers.command,
         base_directory=configuration_file.parent,
+        files_verifier=None,
     )
 
     mock_builder.return_value.build.assert_called_once_with(
