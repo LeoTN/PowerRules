@@ -1,5 +1,4 @@
 import logging
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -11,17 +10,6 @@ from powerrules.application.logging import (
 )
 
 logger = logging.getLogger("powerrules.test_file_only")
-
-
-@pytest.fixture(autouse=True)
-def _reset_powerrules_logger() -> Iterator[None]:
-    yield
-
-    package_logger = logging.getLogger("powerrules")
-
-    for handler in list(package_logger.handlers):
-        handler.close()
-        package_logger.removeHandler(handler)
 
 
 def test_file_only_messages_are_written_to_the_log_file_but_not_to_the_console(

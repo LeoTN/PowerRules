@@ -5,7 +5,7 @@ import pytest
 from powerrules.conditions.matcher import MatchType
 from powerrules.conditions.process import ProcessCondition
 from powerrules.engine.exceptions import ConditionEvaluationError
-from tests.mocks import make_process_provider
+from tests.factories import make_process_provider
 
 
 @pytest.mark.parametrize(

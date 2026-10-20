@@ -1,53 +1,31 @@
+import pytest
+
 from powerrules.conditions.matcher import MatchType, StringMatcher
 
 
-def test_string_matcher_matches_exact_string_case_sensitive() -> None:
+@pytest.mark.parametrize(
+    ("pattern", "match_type", "case_sensitive", "matching_value", "non_matching_value"),
+    [
+        ("test", MatchType.EXACT, True, "test", "TEST"),
+        ("test", MatchType.EXACT, False, "test", "other"),
+        ("test", MatchType.REGEX, True, "test", "TEST"),
+        ("test", MatchType.REGEX, False, "test", "other"),
+        ("^test$", MatchType.REGEX, True, "test", "TEST"),
+        ("^test$", MatchType.REGEX, False, "test", "other"),
+    ],
+)
+def test_string_matcher_matches_according_to_configuration(
+    pattern: str,
+    match_type: MatchType,
+    case_sensitive: bool,
+    matching_value: str,
+    non_matching_value: str,
+) -> None:
     matcher = StringMatcher(
-        pattern="test", match_type=MatchType.EXACT, case_sensitive=True
+        pattern=pattern,
+        match_type=match_type,
+        case_sensitive=case_sensitive,
     )
-    assert matcher.matches("test") is True
-    assert matcher.matches("TEST") is False
 
-
-def test_string_matcher_matches_exact_string_case_insensitive() -> None:
-    matcher = StringMatcher(
-        pattern="test", match_type=MatchType.EXACT, case_sensitive=False
-    )
-    assert matcher.matches("test") is True
-    assert matcher.matches("TEST") is True
-
-
-def test_string_matcher_matches_regex_case_sensitive() -> None:
-    matcher = StringMatcher(
-        pattern="test", match_type=MatchType.REGEX, case_sensitive=True
-    )
-    assert matcher.matches("test") is True
-    assert matcher.matches("TEST") is False
-
-
-def test_string_matcher_matches_regex_case_insensitive() -> None:
-    matcher = StringMatcher(
-        pattern="test", match_type=MatchType.REGEX, case_sensitive=False
-    )
-    assert matcher.matches("test") is True
-    assert matcher.matches("TEST") is True
-
-
-def test_string_matcher_matches_regex_with_string_in_full_match_format_case_sensitive() -> (
-    None
-):
-    matcher = StringMatcher(
-        pattern="^test$", match_type=MatchType.REGEX, case_sensitive=True
-    )
-    assert matcher.matches("test") is True
-    assert matcher.matches("TEST") is False
-
-
-def test_string_matcher_matches_regex_with_string_in_full_match_format_case_insensitive() -> (
-    None
-):
-    matcher = StringMatcher(
-        pattern="^test$", match_type=MatchType.REGEX, case_sensitive=False
-    )
-    assert matcher.matches("test") is True
-    assert matcher.matches("TEST") is True
+    assert matcher.matches(matching_value) is True
+    assert matcher.matches(non_matching_value) is False

@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -13,37 +12,11 @@ from powerrules.cli.trust_output import (
 )
 from powerrules.trust.report import TrustReport, TrustReportEntry
 from powerrules.trust.store import TrustStatus, TrustStore
+from tests.factories import make_trust_report
+from tests.helpers import TRUSTED_AT, get_log_records
 
 LOGGER_NAME = "powerrules.cli.trust_output"
-TRUSTED_AT = datetime(2026, 10, 17, 14, 3)
-
-
-def _make_report(
-    policy: str = "/policies/a.yaml",
-    *statuses: TrustStatus,
-    policy_status: TrustStatus = TrustStatus.TRUSTED,
-    trusted_at: datetime | None = TRUSTED_AT,
-) -> TrustReport:
-    return TrustReport(
-        (
-            TrustReportEntry(
-                Path(policy), policy_status, is_policy=True, trusted_at=trusted_at
-            ),
-            *(
-                TrustReportEntry(Path(f"{policy}.file{index}"), status)
-                for index, status in enumerate(statuses)
-            ),
-        )
-    )
-
-
-def _get_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    return [record for record in caplog.records if record.name == LOGGER_NAME]
-
-
-@pytest.fixture(autouse=True)
-def _capture_logs(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.DEBUG)
+_TRUSTED_AT_FORMAT = "%Y-%m-%d %H:%M"
 
 
 ####################
@@ -54,9 +27,9 @@ def _capture_logs(caplog: pytest.LogCaptureFixture) -> None:
 def test_report_trust_logs_trusted_report_on_console_without_table(
     caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    report_trust(_make_report("/policies/a.yaml", TrustStatus.TRUSTED))
+    report_trust(make_trust_report("/policies/a.yaml", TrustStatus.TRUSTED))
 
-    records = _get_records(caplog)
+    records = get_log_records(caplog, LOGGER_NAME)
 
     assert [record.levelno for record in records] == [logging.INFO, logging.INFO]
     # Without a table the messages are the only feedback, so they are shown on the console
@@ -67,9 +40,9 @@ def test_report_trust_logs_trusted_report_on_console_without_table(
 def test_report_trust_shows_table_and_logs_only_to_file_if_something_is_not_trusted(
     caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    report_trust(_make_report("/policies/a.yaml", TrustStatus.MODIFIED))
+    report_trust(make_trust_report("/policies/a.yaml", TrustStatus.MODIFIED))
 
-    records = _get_records(caplog)
+    records = get_log_records(caplog, LOGGER_NAME)
 
     assert [record.levelno for record in records] == [logging.INFO, logging.WARNING]
     assert all(getattr(record, "file_only", False) for record in records)
@@ -79,20 +52,23 @@ def test_report_trust_shows_table_and_logs_only_to_file_if_something_is_not_trus
 def test_report_trust_can_always_show_table(
     caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    report_trust(_make_report("/policies/a.yaml"), always_show_table=True)
+    report_trust(make_trust_report("/policies/a.yaml"), always_show_table=True)
 
-    assert all(getattr(record, "file_only", False) for record in _get_records(caplog))
+    assert all(
+        getattr(record, "file_only", False)
+        for record in get_log_records(caplog, LOGGER_NAME)
+    )
     assert "Trust status" in capsys.readouterr().out
 
 
 def test_report_trust_logs_description_of_every_entry(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    report = _make_report("/policies/a.yaml", TrustStatus.UNKNOWN)
+    report = make_trust_report("/policies/a.yaml", TrustStatus.UNKNOWN)
 
     report_trust(report)
 
-    assert [record.getMessage() for record in _get_records(caplog)] == [
+    assert [record.getMessage() for record in get_log_records(caplog, LOGGER_NAME)] == [
         entry.describe() for entry in report.entries
     ]
 
@@ -107,8 +83,8 @@ def test_print_trust_reports_shows_columns_and_all_policies(
 ) -> None:
     print_trust_reports(
         [
-            _make_report("/policies/a.yaml", TrustStatus.TRUSTED),
-            _make_report(
+            make_trust_report("/policies/a.yaml", TrustStatus.TRUSTED),
+            make_trust_report(
                 "/policies/b.yaml",
                 TrustStatus.MODIFIED,
                 policy_status=TrustStatus.UNKNOWN,
@@ -130,18 +106,22 @@ def test_print_trust_reports_shows_trusted_time_only_for_policies(
 ) -> None:
     print_trust_reports(
         [
-            _make_report("/policies/a.yaml", TrustStatus.TRUSTED, TrustStatus.TRUSTED),
-            _make_report("/policies/b.yaml", TrustStatus.TRUSTED),
+            make_trust_report(
+                "/policies/a.yaml", TrustStatus.TRUSTED, TrustStatus.TRUSTED
+            ),
+            make_trust_report("/policies/b.yaml", TrustStatus.TRUSTED),
         ]
     )
 
-    assert capsys.readouterr().out.count("2026-10-17 14:03") == 2
+    assert capsys.readouterr().out.count(TRUSTED_AT.strftime(_TRUSTED_AT_FORMAT)) == 2
 
 
 def test_print_trust_reports_leaves_time_empty_for_policy_which_was_never_trusted(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    print_trust_report(_make_report(policy_status=TrustStatus.UNKNOWN, trusted_at=None))
+    print_trust_report(
+        make_trust_report(policy_status=TrustStatus.UNKNOWN, trusted_at=None)
+    )
 
     assert "2026" not in capsys.readouterr().out
 
@@ -208,6 +188,6 @@ def test_create_trust_checker_reporter_shows_table_if_requested(
 
     assert checker.reporter is not None
 
-    checker.reporter(_make_report())
+    checker.reporter(make_trust_report())
 
     assert "Trust status" in capsys.readouterr().out

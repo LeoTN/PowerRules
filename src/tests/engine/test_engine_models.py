@@ -1,7 +1,7 @@
 import pytest
 
 from powerrules.engine.models import Rule, RuleEvaluationResult, RuleSet
-from tests.mocks import make_action, make_condition
+from tests.factories import make_action, make_condition, make_rule
 
 ############
 # Rule tests
@@ -12,6 +12,7 @@ def test_rule_uses_expected_defaults() -> None:
     condition = make_condition()
     action = make_action()
 
+    # The model is created directly, because "make_rule()" always passes "enabled" explicitly
     rule = Rule(
         name="Test rule",
         condition=condition,
@@ -25,12 +26,7 @@ def test_rule_uses_expected_defaults() -> None:
 
 
 def test_rule_can_be_disabled() -> None:
-    rule = Rule(
-        name="Disabled test rule",
-        condition=make_condition(),
-        actions=(make_action(),),
-        enabled=False,
-    )
+    rule = make_rule("Disabled test rule", enabled=False)
 
     assert rule.enabled is False
 
@@ -39,35 +35,26 @@ def test_rule_can_contain_multiple_actions_in_order() -> None:
     first_action = make_action("First action")
     second_action = make_action("Second action")
 
-    rule = Rule(
-        name="Test rule",
-        condition=make_condition(),
-        actions=(first_action, second_action),
-    )
+    rule = make_rule(actions=[first_action, second_action])
 
     assert rule.actions == (first_action, second_action)
 
 
-def test_rule_is_immutable() -> None:
-    rule = Rule(
-        name="Test rule",
-        condition=make_condition(),
-        actions=(make_action(),),
-    )
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("name", "Modified rule"),
+        ("actions", ()),
+    ],
+)
+def test_rule_is_immutable(
+    attribute: str,
+    value: object,
+) -> None:
+    rule = make_rule()
 
     with pytest.raises(AttributeError):
-        rule.name = "Modified rule"  # type: ignore (ignore this Pylance error even though it is correct)
-
-
-def test_rule_actions_are_immutable() -> None:
-    rule = Rule(
-        name="Test rule",
-        condition=make_condition(),
-        actions=(make_action(),),
-    )
-
-    with pytest.raises(AttributeError):
-        rule.actions = ()  # type: ignore (ignore this Pylance error even though it is correct)
+        setattr(rule, attribute, value)
 
 
 ###############
@@ -75,41 +62,11 @@ def test_rule_actions_are_immutable() -> None:
 ###############
 
 
-def test_rule_set_contains_rules() -> None:
-    rule = Rule(
-        name="Test rule",
-        condition=make_condition(),
-        actions=(make_action(),),
-    )
+@pytest.mark.parametrize("rule_count", [0, 1, 2])
+def test_rule_set_contains_rules_in_order(rule_count: int) -> None:
+    rules = tuple(make_rule(f"Test rule {number}") for number in range(rule_count))
 
-    rule_set = RuleSet(rules=(rule,))
-
-    assert rule_set.rules == (rule,)
-
-
-def test_rule_set_can_contain_multiple_rules() -> None:
-    first_rule = Rule(
-        name="First test rule",
-        condition=make_condition(),
-        actions=(make_action(),),
-    )
-
-    second_rule = Rule(
-        name="Second test rule",
-        condition=make_condition(),
-        actions=(make_action(),),
-    )
-
-    rule_set = RuleSet(rules=(first_rule, second_rule))
-
-    assert rule_set.rules == (
-        first_rule,
-        second_rule,
-    )
-
-
-def test_rule_set_can_be_empty() -> None:
-    assert RuleSet(rules=()).rules == ()
+    assert RuleSet(rules=rules).rules == rules
 
 
 def test_rule_set_is_immutable() -> None:
@@ -132,11 +89,7 @@ def test_rule_evaluation_result_uses_expected_defaults() -> None:
 
 
 def test_rule_evaluation_result_contains_matched_rule() -> None:
-    rule = Rule(
-        name="Test rule",
-        condition=make_condition(),
-        actions=(make_action(),),
-    )
+    rule = make_rule()
 
     result = RuleEvaluationResult(matched_rule=rule, action_triggered=True)
 

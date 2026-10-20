@@ -16,22 +16,8 @@ from powerrules.config.models import (
     TimeRangeConfiguration,
 )
 from powerrules.providers.command import Shell
-
-
-def _make_rule_data(**overrides: object) -> dict[str, object]:
-    """Create the raw data of a valid rule. The given fields replace the defaults."""
-    rule: dict[str, object] = {
-        "name": "Test rule",
-        "conditions": {"process": {"name": "backup.exe", "exists": False}},
-        "actions": [{"run": "echo test"}],
-    }
-
-    return {**rule, **overrides}
-
-
-def _validate_action(**fields: object) -> ActionConfiguration:
-    """Validate an action which consists of a command and the given fields."""
-    return ActionConfiguration.model_validate({"run": "echo test", **fields})
+from tests.factories import make_action_configuration
+from tests.helpers import make_rule_data, make_trusted_files_rule_data
 
 
 def test_rule_set_configuration_accepts_valid_rule() -> None:
@@ -86,7 +72,7 @@ def test_and_condition_requires_at_least_two_conditions() -> None:
         RuleSetConfiguration.model_validate(
             {
                 "rules": [
-                    _make_rule_data(
+                    make_rule_data(
                         conditions={
                             "and": [
                                 {
@@ -109,7 +95,7 @@ def test_or_condition_requires_at_least_two_conditions() -> None:
         RuleSetConfiguration.model_validate(
             {
                 "rules": [
-                    _make_rule_data(
+                    make_rule_data(
                         conditions={
                             "or": [{"process": {"name": "backup.exe", "exists": False}}]
                         }
@@ -123,7 +109,7 @@ def test_not_condition_accepts_single_condition() -> None:
     configuration = RuleSetConfiguration.model_validate(
         {
             "rules": [
-                _make_rule_data(
+                make_rule_data(
                     conditions={
                         "not": {
                             "process": {
@@ -154,7 +140,7 @@ def test_condition_must_define_exactly_one_variant(
     conditions: dict[str, object],
 ) -> None:
     with pytest.raises(ValidationError, match="must define exactly one of"):
-        RuleConfiguration.model_validate(_make_rule_data(conditions=conditions))
+        RuleConfiguration.model_validate(make_rule_data(conditions=conditions))
 
 
 ############
@@ -164,7 +150,7 @@ def test_condition_must_define_exactly_one_variant(
 
 def test_rule_configuration_keeps_actions_in_configured_order() -> None:
     rule = RuleConfiguration.model_validate(
-        _make_rule_data(actions=[{"run": "first"}, {"run": "second"}, {"run": "third"}])
+        make_rule_data(actions=[{"run": "first"}, {"run": "second"}, {"run": "third"}])
     )
 
     assert [action.run for action in rule.actions] == ["first", "second", "third"]
@@ -172,11 +158,11 @@ def test_rule_configuration_keeps_actions_in_configured_order() -> None:
 
 def test_rule_configuration_rejects_empty_action_list() -> None:
     with pytest.raises(ValidationError, match="at least 1 item"):
-        RuleConfiguration.model_validate(_make_rule_data(actions=[]))
+        RuleConfiguration.model_validate(make_rule_data(actions=[]))
 
 
 def test_rule_configuration_rejects_missing_actions() -> None:
-    data = _make_rule_data()
+    data = make_rule_data()
     del data["actions"]
 
     with pytest.raises(ValidationError, match="Field required"):
@@ -185,7 +171,7 @@ def test_rule_configuration_rejects_missing_actions() -> None:
 
 # Guards against the former single "action" with a type
 def test_rule_configuration_rejects_former_single_action() -> None:
-    data = _make_rule_data(action={"type": "shutdown"})
+    data = make_rule_data(action={"type": "shutdown"})
     del data["actions"]
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
@@ -194,7 +180,7 @@ def test_rule_configuration_rejects_former_single_action() -> None:
 
 def test_rule_configuration_rejects_non_boolean_enabled() -> None:
     with pytest.raises(ValidationError, match="valid boolean"):
-        RuleConfiguration.model_validate(_make_rule_data(enabled="false"))
+        RuleConfiguration.model_validate(make_rule_data(enabled="false"))
 
 
 #################################
@@ -203,7 +189,7 @@ def test_rule_configuration_rejects_non_boolean_enabled() -> None:
 
 
 def test_action_configuration_uses_defaults() -> None:
-    action = _validate_action()
+    action = make_action_configuration()
 
     assert action.run == "echo test"
     assert action.name is None
@@ -217,29 +203,27 @@ def test_action_configuration_uses_defaults() -> None:
 
 
 def test_action_configuration_does_not_share_mutable_defaults() -> None:
-    first_action = _validate_action()
+    first_action = make_action_configuration()
     first_action.env["KEY"] = "value"
     first_action.success_exit_codes.append(1)
 
-    second_action = _validate_action()
+    second_action = make_action_configuration()
 
     assert second_action.env == {}
     assert second_action.success_exit_codes == [0]
 
 
 def test_action_configuration_accepts_all_options() -> None:
-    action = ActionConfiguration.model_validate(
-        {
-            "run": "backup.sh",
-            "name": "Backup",
-            "shell": "bash",
-            "working_directory": "scripts",
-            "env": {"KEY": "value"},
-            "timeout": 2.5,
-            "success_exit_codes": [0, 3],
-            "wait": True,
-            "continue_on_error": True,
-        }
+    action = make_action_configuration(
+        run="backup.sh",
+        name="Backup",
+        shell="bash",
+        working_directory="scripts",
+        env={"KEY": "value"},
+        timeout=2.5,
+        success_exit_codes=[0, 3],
+        wait=True,
+        continue_on_error=True,
     )
 
     assert action.run == "backup.sh"
@@ -265,13 +249,13 @@ def test_action_configuration_rejects_former_type_field() -> None:
 
 def test_action_configuration_rejects_unknown_field() -> None:
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        _validate_action(unknown=True)
+        make_action_configuration(unknown=True)
 
 
 def test_action_configuration_keeps_multiline_command_unchanged() -> None:
-    assert (
-        _validate_action(run="  echo one\necho two\n").run == "  echo one\necho two\n"
-    )
+    command = "  echo one\necho two\n"
+
+    assert make_action_configuration(run=command).run == command
 
 
 ################################
@@ -283,28 +267,28 @@ def test_action_configuration_keeps_multiline_command_unchanged() -> None:
 @pytest.mark.parametrize("value", ["", " ", "\n\t"])
 def test_action_configuration_rejects_blank_text(field: str, value: str) -> None:
     with pytest.raises(ValidationError, match=f"The '{field}' value must not be blank"):
-        _validate_action(**{field: value})
+        make_action_configuration(**{field: value})
 
 
 def test_action_configuration_accepts_explicit_none_name() -> None:
-    assert _validate_action(name=None).name is None
+    assert make_action_configuration(name=None).name is None
 
 
 @pytest.mark.parametrize("shell", list(Shell))
 def test_action_configuration_accepts_every_shell(shell: Shell) -> None:
-    assert _validate_action(shell=shell.value).shell is shell
+    assert make_action_configuration(shell=shell.value).shell is shell
 
 
 @pytest.mark.parametrize("shell", ["zsh", "BASH", ""])
 def test_action_configuration_rejects_unknown_shell(shell: str) -> None:
     with pytest.raises(ValidationError, match="Input should be"):
-        _validate_action(shell=shell)
+        make_action_configuration(shell=shell)
 
 
 def test_action_configuration_converts_working_directory_to_path() -> None:
-    assert _validate_action(working_directory="scripts/nightly").working_directory == (
-        Path("scripts/nightly")
-    )
+    action = make_action_configuration(working_directory="scripts/nightly")
+
+    assert action.working_directory == Path("scripts/nightly")
 
 
 @pytest.mark.parametrize("working_directory", ["", "  "])
@@ -314,7 +298,7 @@ def test_action_configuration_rejects_blank_working_directory(
     with pytest.raises(
         ValidationError, match="The 'working_directory' value must not be blank"
     ):
-        _validate_action(working_directory=working_directory)
+        make_action_configuration(working_directory=working_directory)
 
 
 ###############################
@@ -324,7 +308,7 @@ def test_action_configuration_rejects_blank_working_directory(
 
 # YAML turns unquoted values into numbers and booleans, environment variables are always strings
 def test_action_configuration_converts_environment_values_to_strings() -> None:
-    action = _validate_action(
+    action = make_action_configuration(
         env={
             "TEXT": "value",
             "INTEGER": 3,
@@ -346,7 +330,7 @@ def test_action_configuration_converts_environment_values_to_strings() -> None:
 @pytest.mark.parametrize("name", ["", "A=B", "=A"])
 def test_action_configuration_rejects_invalid_environment_names(name: str) -> None:
     with pytest.raises(ValidationError, match="Invalid environment variable name"):
-        _validate_action(env={name: "value"})
+        make_action_configuration(env={name: "value"})
 
 
 @pytest.mark.parametrize(
@@ -355,7 +339,7 @@ def test_action_configuration_rejects_invalid_environment_names(name: str) -> No
 )
 def test_action_configuration_rejects_reserved_environment_names(name: str) -> None:
     with pytest.raises(ValidationError, match="is reserved"):
-        _validate_action(env={name: "value"})
+        make_action_configuration(env={name: "value"})
 
 
 @pytest.mark.parametrize("value", [None, ["a"], {"a": "b"}])
@@ -363,7 +347,7 @@ def test_action_configuration_rejects_unsupported_environment_values(
     value: object,
 ) -> None:
     with pytest.raises(ValidationError, match="valid string"):
-        _validate_action(env={"KEY": value})
+        make_action_configuration(env={"KEY": value})
 
 
 @pytest.mark.parametrize("env", ["KEY=value", ["KEY=value"]])
@@ -371,11 +355,11 @@ def test_action_configuration_rejects_environment_which_is_not_a_mapping(
     env: object,
 ) -> None:
     with pytest.raises(ValidationError, match="valid dictionary"):
-        _validate_action(env=env)
+        make_action_configuration(env=env)
 
 
 def test_action_configuration_hides_environment_values_in_representation() -> None:
-    action = _validate_action(env={"TOKEN": "super-secret"})
+    action = make_action_configuration(env={"TOKEN": "super-secret"})
 
     assert "super-secret" not in repr(action)
 
@@ -387,19 +371,19 @@ def test_action_configuration_hides_environment_values_in_representation() -> No
 
 @pytest.mark.parametrize("timeout", [30, 2.5, 0.001, None])
 def test_action_configuration_accepts_timeout(timeout: float | None) -> None:
-    assert _validate_action(timeout=timeout).timeout == timeout
+    assert make_action_configuration(timeout=timeout).timeout == timeout
 
 
 @pytest.mark.parametrize("timeout", [0, -1, -0.5, float("nan")])
 def test_action_configuration_rejects_non_positive_timeout(timeout: float) -> None:
     with pytest.raises(ValidationError, match="'timeout' must be greater than zero"):
-        _validate_action(timeout=timeout)
+        make_action_configuration(timeout=timeout)
 
 
 @pytest.mark.parametrize("timeout", ["5", "none", [5]])
 def test_action_configuration_rejects_non_numeric_timeout(timeout: object) -> None:
     with pytest.raises(ValidationError):
-        _validate_action(timeout=timeout)
+        make_action_configuration(timeout=timeout)
 
 
 ##############################################
@@ -411,14 +395,14 @@ def test_action_configuration_rejects_non_numeric_timeout(timeout: object) -> No
 def test_action_configuration_accepts_success_exit_codes(
     exit_codes: list[int],
 ) -> None:
-    assert _validate_action(success_exit_codes=exit_codes).success_exit_codes == (
-        exit_codes
-    )
+    action = make_action_configuration(success_exit_codes=exit_codes)
+
+    assert action.success_exit_codes == exit_codes
 
 
 def test_action_configuration_rejects_empty_success_exit_codes() -> None:
     with pytest.raises(ValidationError, match="at least 1 item"):
-        _validate_action(success_exit_codes=[])
+        make_action_configuration(success_exit_codes=[])
 
 
 @pytest.mark.parametrize("exit_codes", [["0"], [1.5], 0])
@@ -426,7 +410,7 @@ def test_action_configuration_rejects_invalid_success_exit_codes(
     exit_codes: object,
 ) -> None:
     with pytest.raises(ValidationError):
-        _validate_action(success_exit_codes=exit_codes)
+        make_action_configuration(success_exit_codes=exit_codes)
 
 
 @pytest.mark.parametrize("field", ["wait", "continue_on_error"])
@@ -435,7 +419,7 @@ def test_action_configuration_rejects_non_boolean_flags(
     field: str, value: object
 ) -> None:
     with pytest.raises(ValidationError, match="valid boolean"):
-        _validate_action(**{field: value})
+        make_action_configuration(**{field: value})
 
 
 ######################################
@@ -444,13 +428,13 @@ def test_action_configuration_rejects_non_boolean_flags(
 
 
 def test_action_configuration_accepts_background_action_without_other_options() -> None:
-    action = _validate_action(wait=False)
+    action = make_action_configuration(wait=False)
 
     assert action.wait is False
 
 
 def test_action_configuration_accepts_waiting_action_with_all_waiting_options() -> None:
-    action = _validate_action(wait=True, timeout=5, success_exit_codes=[0, 1])
+    action = make_action_configuration(wait=True, timeout=5, success_exit_codes=[0, 1])
 
     assert action.timeout == 5
     assert action.success_exit_codes == [0, 1]
@@ -477,7 +461,7 @@ def test_action_configuration_rejects_waiting_options_for_background_action(
     message: str,
 ) -> None:
     with pytest.raises(ValidationError, match=message):
-        _validate_action(wait=False, **options)
+        make_action_configuration(wait=False, **options)
 
 
 ####################
@@ -485,97 +469,47 @@ def test_action_configuration_rejects_waiting_options_for_background_action(
 ####################
 
 
-def test_datetime_configuration_parses_hour_only() -> None:
-    # Test the conversion of the dictionary with the custom parser method "_parse_time" to a time object
+# Test the conversion of the dictionary with the custom parser method "_parse_time" to a time object
+@pytest.mark.parametrize(
+    ("start", "end", "expected_start", "expected_end"),
+    [
+        ("6", "12", time(6, 0), time(12, 0)),
+        ("6:30", "12:30", time(6, 30), time(12, 30)),
+        ("6:30:15", "12:30:15", time(6, 30, 15), time(12, 30, 15)),
+    ],
+)
+def test_datetime_configuration_parses_time_formats(
+    start: str,
+    end: str,
+    expected_start: time,
+    expected_end: time,
+) -> None:
     configuration = DateTimeConditionConfiguration.model_validate(
-        {
-            "between": {
-                "start": "6",
-                "end": "12",
-            }
-        }
+        {"between": {"start": start, "end": end}}
     )
 
     assert configuration.between is not None
-    assert configuration.between.start == time(6, 0)
-    assert configuration.between.end == time(12, 0)
+    assert configuration.between.start == expected_start
+    assert configuration.between.end == expected_end
 
 
-def test_datetime_configuration_parses_hour_and_minute() -> None:
-    configuration = DateTimeConditionConfiguration.model_validate(
-        {
-            "between": {
-                "start": "6:30",
-                "end": "12:30",
-            }
-        }
-    )
-
-    assert configuration.between is not None
-    assert configuration.between.start == time(6, 30)
-    assert configuration.between.end == time(12, 30)
-
-
-def test_datetime_configuration_parses_hour_minute_and_second() -> None:
-    configuration = DateTimeConditionConfiguration.model_validate(
-        {
-            "between": {
-                "start": "6:30:15",
-                "end": "12:30:15",
-            }
-        }
-    )
-
-    assert configuration.between is not None
-    assert configuration.between.start == time(6, 30, 15)
-    assert configuration.between.end == time(12, 30, 15)
-
-
-def test_datetime_configuration_rejects_invalid_time() -> None:
+@pytest.mark.parametrize(
+    "start",
+    [
+        # The hour is out of range
+        "25:00",
+        # The minutes need two digits
+        "7:1",
+        # The seconds need two digits
+        "7:12:3",
+        # Too many components
+        "7:12:34:56",
+    ],
+)
+def test_datetime_configuration_rejects_invalid_time(start: str) -> None:
     with pytest.raises(ValidationError):
         DateTimeConditionConfiguration.model_validate(
-            {
-                "between": {
-                    "start": "25:00",
-                    "end": "12:00",
-                }
-            }
-        )
-
-
-def test_datetime_configuration_rejects_invalid_time_format() -> None:
-    with pytest.raises(ValidationError):
-        DateTimeConditionConfiguration.model_validate(
-            {
-                "between": {
-                    "start": "7:1",
-                    "end": "12:00",
-                }
-            }
-        )
-
-
-def test_datetime_configuration_rejects_single_digit_seconds() -> None:
-    with pytest.raises(ValidationError):
-        DateTimeConditionConfiguration.model_validate(
-            {
-                "between": {
-                    "start": "7:12:3",
-                    "end": "12:00",
-                }
-            }
-        )
-
-
-def test_datetime_configuration_rejects_too_many_time_components() -> None:
-    with pytest.raises(ValidationError):
-        DateTimeConditionConfiguration.model_validate(
-            {
-                "between": {
-                    "start": "7:12:34:56",
-                    "end": "12:00",
-                }
-            }
+            {"between": {"start": start, "end": "12:00"}}
         )
 
 
@@ -618,34 +552,22 @@ def test_datetime_configuration_rejects_empty_configuration() -> None:
         DateTimeConditionConfiguration.model_validate({})
 
 
-def test_datetime_configuration_rejects_empty_weekday_list() -> None:
+@pytest.mark.parametrize(
+    "configuration",
+    [
+        {"weekday": []},
+        # A valid 'between' must not make up for an empty weekday list
+        {"between": {"start": "22:00", "end": "6:00"}, "weekday": []},
+    ],
+)
+def test_datetime_configuration_rejects_empty_weekday_list(
+    configuration: dict[str, object],
+) -> None:
     with pytest.raises(
         ValidationError,
         match="'weekday' list must contain at least one weekday",
     ):
-        DateTimeConditionConfiguration.model_validate({"weekday": []})
-
-
-# A valid 'between' must not make up for an empty weekday list
-def test_datetime_configuration_rejects_empty_weekday_list_with_between() -> None:
-    with pytest.raises(
-        ValidationError,
-        match="'weekday' list must contain at least one weekday",
-    ):
-        DateTimeConditionConfiguration.model_validate(
-            {
-                "between": {
-                    "start": "22:00",
-                    "end": "6:00",
-                },
-                "weekday": [],
-            }
-        )
-
-
-def test_datetime_configuration_rejects_unknown_weekday() -> None:
-    with pytest.raises(ValidationError):
-        DateTimeConditionConfiguration.model_validate({"weekday": ["Funday"]})
+        DateTimeConditionConfiguration.model_validate(configuration)
 
 
 #################################
@@ -821,24 +743,24 @@ def test_date_range_configuration_can_be_combined_with_weekday() -> None:
     assert configuration.weekday == [Weekday.SATURDAY, Weekday.SUNDAY]
 
 
-@pytest.mark.parametrize("invalid_date", ["2026-13-01", "2026-02-30", "2027-02-29"])
-def test_date_range_configuration_rejects_impossible_date(invalid_date: str) -> None:
-    with pytest.raises(ValidationError, match="Invalid date value"):
-        DateTimeConditionConfiguration.model_validate(
-            {
-                "between": {
-                    "start": invalid_date,
-                    "end": "2030-01-01",
-                }
-            }
-        )
-
-
-@pytest.mark.parametrize("invalid_date", ["2026-1-5", "26-12-24", "2026-12-2"])
-def test_date_range_configuration_rejects_invalid_date_format(
+@pytest.mark.parametrize(
+    ("invalid_date", "message"),
+    [
+        # Well-formed, but not an existing date
+        ("2026-13-01", "Invalid date value"),
+        ("2026-02-30", "Invalid date value"),
+        ("2027-02-29", "Invalid date value"),
+        # Not in the format YYYY-MM-DD
+        ("2026-1-5", "Invalid date format"),
+        ("26-12-24", "Invalid date format"),
+        ("2026-12-2", "Invalid date format"),
+    ],
+)
+def test_date_range_configuration_rejects_invalid_date(
     invalid_date: str,
+    message: str,
 ) -> None:
-    with pytest.raises(ValidationError, match="Invalid date format"):
+    with pytest.raises(ValidationError, match=message):
         DateTimeConditionConfiguration.model_validate(
             {
                 "between": {
@@ -1168,7 +1090,7 @@ def test_datetime_configuration_parses_weekday_and_month_regardless_of_case() ->
 
 # Names have to be complete English weekday names, only the case is ignored
 @pytest.mark.parametrize(
-    "invalid_weekday", ["Mon", "Mondayy", "", "1", "Montag", 5, None]
+    "invalid_weekday", ["Mon", "Mondayy", "Funday", "", "1", "Montag", 5, None]
 )
 def test_datetime_configuration_rejects_unknown_weekday_names(
     invalid_weekday: object,
@@ -1183,3 +1105,70 @@ def test_datetime_configuration_rejects_weekday_which_is_not_a_list(
 ) -> None:
     with pytest.raises(ValidationError, match="valid list"):
         DateTimeConditionConfiguration.model_validate({"weekday": weekday})
+
+
+#####################
+# Trusted files tests
+#####################
+
+
+def test_action_configuration_has_no_trusted_files_by_default() -> None:
+    assert make_action_configuration().trusted_files == []
+
+
+def test_action_configuration_does_not_share_trusted_files_between_instances() -> None:
+    first = make_action_configuration()
+    first.trusted_files.append(Path("a.sh"))
+
+    assert make_action_configuration().trusted_files == []
+
+
+def test_action_configuration_converts_trusted_files_to_paths() -> None:
+    action = make_action_configuration(trusted_files=["scripts/a.sh", "/opt/b.sh"])
+
+    assert action.trusted_files == [Path("scripts/a.sh"), Path("/opt/b.sh")]
+
+
+@pytest.mark.parametrize("files", [[""], ["   "], ["a.sh", ""], ["a.sh", " \t"]])
+def test_action_configuration_rejects_blank_trusted_file(files: list[str]) -> None:
+    with pytest.raises(
+        ValidationError, match="'trusted_files' entries must not be blank"
+    ):
+        make_action_configuration(trusted_files=files)
+
+
+@pytest.mark.parametrize("files", ["a.sh", {"a": "b"}])
+def test_action_configuration_rejects_trusted_files_which_are_not_a_list(
+    files: object,
+) -> None:
+    with pytest.raises(ValidationError, match="valid list"):
+        make_action_configuration(trusted_files=files)
+
+
+def test_rule_set_returns_trusted_files_of_all_rules_including_disabled_ones() -> None:
+    configuration = RuleSetConfiguration.model_validate(
+        {
+            "rules": [
+                make_trusted_files_rule_data("First", ["a.sh", "b.sh"]),
+                make_trusted_files_rule_data(
+                    "Disabled", ["b.sh", "c.sh"], enabled=False
+                ),
+            ]
+        }
+    )
+
+    # Duplicates are removed later by "resolve_trusted_files()"
+    assert configuration.get_trusted_files() == (
+        Path("a.sh"),
+        Path("b.sh"),
+        Path("b.sh"),
+        Path("c.sh"),
+    )
+
+
+def test_rule_set_without_trusted_files_returns_empty_tuple() -> None:
+    configuration = RuleSetConfiguration.model_validate(
+        {"rules": [make_trusted_files_rule_data("First", [])]}
+    )
+
+    assert configuration.get_trusted_files() == ()

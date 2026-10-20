@@ -9,8 +9,9 @@ from typer.testing import CliRunner
 from powerrules.cli.app import app
 from powerrules.cli.errors import EXIT_POLICY_ERROR, EXIT_RUNTIME_ERROR
 from powerrules.engine.exceptions import ActionExecutionError, ConditionEvaluationError
-from powerrules.engine.models import Rule, RuleEvaluationResult
-from tests.mocks import make_action, make_condition
+from powerrules.engine.models import RuleEvaluationResult
+from tests.factories import make_rule_with_actions
+from tests.helpers import get_plain_output, write_policy
 
 runner = CliRunner()
 
@@ -33,23 +34,6 @@ def runtime() -> Iterator[Mock]:
         yield runtime_class.return_value
 
 
-def _write_policy(tmp_path: Path, content: str = VALID_POLICY) -> Path:
-    """Write a policy file into the temporary directory."""
-    policy_file = tmp_path / "powerrules.yaml"
-    policy_file.write_text(content, encoding="utf-8")
-
-    return policy_file
-
-
-def _make_rule(*action_names: str) -> Rule:
-    """Create a matching rule with actions of the given names."""
-    return Rule(
-        name="Test rule",
-        condition=make_condition(True),
-        actions=tuple(make_action(name) for name in action_names or ("Shutdown",)),
-    )
-
-
 #############
 # Basic tests
 #############
@@ -59,7 +43,7 @@ def test_cli_displays_help() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "A rule-based command automation tool" in result.stdout
+    assert "A rule-based command automation tool" in get_plain_output(result)
 
 
 def test_cli_version() -> None:
@@ -77,7 +61,7 @@ def test_cli_policy_displays_help() -> None:
     result = runner.invoke(app, ["policy", "--help"])
 
     assert result.exit_code == 0
-    assert "Manage PowerRules policies." in result.stdout
+    assert "Manage PowerRules policies." in get_plain_output(result)
 
 
 ################
@@ -86,16 +70,16 @@ def test_cli_policy_displays_help() -> None:
 
 
 def test_cli_policy_validate(tmp_path: Path) -> None:
-    policy_file = _write_policy(tmp_path)
+    policy_file = write_policy(tmp_path, VALID_POLICY)
 
     result = runner.invoke(app, ["policy", "validate", "--policy", str(policy_file)])
 
     assert result.exit_code == 0
-    assert f"Policy '{policy_file}' is valid" in result.stdout
+    assert f"Policy '{policy_file}' is valid" in get_plain_output(result)
 
 
 def test_cli_policy_validate_rejects_invalid_policy(tmp_path: Path) -> None:
-    policy_file = _write_policy(
+    policy_file = write_policy(
         tmp_path,
         """
 rules:
@@ -112,12 +96,12 @@ rules:
     result = runner.invoke(app, ["policy", "validate", "--policy", str(policy_file)])
 
     assert result.exit_code == EXIT_POLICY_ERROR
-    assert "Policy validation failed" in result.output
-    assert "rules.0.conditions.process.exists" in result.output
+    assert "Policy validation failed" in get_plain_output(result, "output")
+    assert "rules.0.conditions.process.exists" in get_plain_output(result, "output")
 
 
 def test_cli_policy_validate_rejects_former_action_format(tmp_path: Path) -> None:
-    policy_file = _write_policy(
+    policy_file = write_policy(
         tmp_path,
         """
 rules:
@@ -134,11 +118,11 @@ rules:
     result = runner.invoke(app, ["policy", "validate", "--policy", str(policy_file)])
 
     assert result.exit_code == EXIT_POLICY_ERROR
-    assert "Policy validation failed" in result.output
+    assert "Policy validation failed" in get_plain_output(result, "output")
 
 
 def test_cli_policy_validate_rejects_rule_without_actions(tmp_path: Path) -> None:
-    policy_file = _write_policy(
+    policy_file = write_policy(
         tmp_path,
         """
 rules:
@@ -154,16 +138,16 @@ rules:
     result = runner.invoke(app, ["policy", "validate", "--policy", str(policy_file)])
 
     assert result.exit_code == EXIT_POLICY_ERROR
-    assert "at least 1 item" in result.output
+    assert "at least 1 item" in get_plain_output(result, "output")
 
 
 def test_cli_policy_validate_rejects_invalid_yaml(tmp_path: Path) -> None:
-    policy_file = _write_policy(tmp_path, 'rules:\n  - name: "Broken rule\n')
+    policy_file = write_policy(tmp_path, 'rules:\n  - name: "Broken rule\n')
 
     result = runner.invoke(app, ["policy", "validate", "--policy", str(policy_file)])
 
     assert result.exit_code == EXIT_POLICY_ERROR
-    assert "Failed to parse policy file" in result.output
+    assert "Failed to parse policy file" in get_plain_output(result, "output")
 
 
 def test_cli_policy_validate_reports_missing_policy(tmp_path: Path) -> None:
@@ -172,7 +156,7 @@ def test_cli_policy_validate_reports_missing_policy(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == EXIT_POLICY_ERROR
-    assert "Policy file not found" in result.output
+    assert "Policy file not found" in get_plain_output(result, "output")
 
 
 ############
@@ -181,7 +165,7 @@ def test_cli_policy_validate_reports_missing_policy(tmp_path: Path) -> None:
 
 
 def test_cli_policy_show(tmp_path: Path) -> None:
-    policy_file = _write_policy(
+    policy_file = write_policy(
         tmp_path,
         """
 rules:
@@ -207,8 +191,8 @@ rules:
     result = runner.invoke(app, ["policy", "show", "--policy", str(policy_file)])
 
     assert result.exit_code == 0
-    assert "1. First test rule [enabled]" in result.stdout
-    assert "2. Disabled test rule [disabled]" in result.stdout
+    assert "1. First test rule [enabled]" in get_plain_output(result)
+    assert "2. Disabled test rule [disabled]" in get_plain_output(result)
 
 
 ##################
@@ -218,7 +202,7 @@ rules:
 
 def test_cli_policy_run_once_reports_matching_rule(runtime: Mock) -> None:
     runtime.run_once.return_value = RuleEvaluationResult(
-        matched_rule=_make_rule("Cleanup", "Shutdown")
+        matched_rule=make_rule_with_actions("Cleanup", "Shutdown")
     )
 
     result = runner.invoke(app, ["policy", "run", "--once"])
@@ -226,7 +210,7 @@ def test_cli_policy_run_once_reports_matching_rule(runtime: Mock) -> None:
     assert result.exit_code == 0
     assert (
         "Rule 'Test rule' matched, executed actions: 'Cleanup', 'Shutdown'"
-        in result.stdout
+        in get_plain_output(result)
     )
     runtime.run_once.assert_called_once_with(
         configuration_path=Path("powerrules.yaml"), dry_run=False
@@ -240,7 +224,7 @@ def test_cli_policy_run_once_reports_no_match(runtime: Mock) -> None:
     result = runner.invoke(app, ["policy", "run", "--once"])
 
     assert result.exit_code == 0
-    assert "No rule matched" in result.stdout
+    assert "No rule matched" in get_plain_output(result)
     runtime.run_once.assert_called_once_with(
         configuration_path=Path("powerrules.yaml"), dry_run=False
     )
@@ -249,7 +233,7 @@ def test_cli_policy_run_once_reports_no_match(runtime: Mock) -> None:
 
 def test_cli_policy_run_once_reports_dry_run_match(runtime: Mock) -> None:
     runtime.run_once.return_value = RuleEvaluationResult(
-        matched_rule=_make_rule("Cleanup", "Shutdown")
+        matched_rule=make_rule_with_actions("Cleanup", "Shutdown")
     )
 
     result = runner.invoke(app, ["policy", "run", "--once", "--dry-run"])
@@ -257,9 +241,11 @@ def test_cli_policy_run_once_reports_dry_run_match(runtime: Mock) -> None:
     assert result.exit_code == 0
     assert (
         "[DRY RUN] Rule 'Test rule' matched, would have executed actions: 'Cleanup', 'Shutdown'"
-        in result.stdout
+        in get_plain_output(result)
     )
-    assert "executed actions:" not in result.stdout.replace("would have executed", "")
+    assert "executed actions:" not in get_plain_output(result).replace(
+        "would have executed", ""
+    )
     runtime.run_once.assert_called_once_with(
         configuration_path=Path("powerrules.yaml"), dry_run=True
     )
@@ -268,7 +254,7 @@ def test_cli_policy_run_once_reports_dry_run_match(runtime: Mock) -> None:
 def test_cli_policy_run_once_uses_custom_policy_path(
     runtime: Mock, tmp_path: Path
 ) -> None:
-    policy_file = _write_policy(tmp_path)
+    policy_file = write_policy(tmp_path, VALID_POLICY)
     runtime.run_once.return_value = RuleEvaluationResult(matched_rule=None)
 
     result = runner.invoke(
@@ -276,7 +262,7 @@ def test_cli_policy_run_once_uses_custom_policy_path(
     )
 
     assert result.exit_code == 0
-    assert "No rule matched" in result.stdout
+    assert "No rule matched" in get_plain_output(result)
     runtime.run_once.assert_called_once_with(
         configuration_path=policy_file, dry_run=False
     )
@@ -305,7 +291,7 @@ def test_cli_policy_run_once_reports_runtime_errors(
     result = runner.invoke(app, ["policy", "run", "--once"])
 
     assert result.exit_code == EXIT_RUNTIME_ERROR
-    assert message in result.output
+    assert message in get_plain_output(result, "output")
 
 
 ########################
@@ -376,7 +362,8 @@ def test_cli_policy_run_logs_triggered_match(runtime: Mock) -> None:
     runtime.run_continuously.return_value = iter(
         [
             RuleEvaluationResult(
-                matched_rule=_make_rule("Cleanup", "Shutdown"), action_triggered=True
+                matched_rule=make_rule_with_actions("Cleanup", "Shutdown"),
+                action_triggered=True,
             )
         ]
     )
@@ -386,7 +373,7 @@ def test_cli_policy_run_logs_triggered_match(runtime: Mock) -> None:
     assert result.exit_code == 0
     assert (
         "Rule 'Test rule' matched, executed actions: 'Cleanup', 'Shutdown'"
-        in result.stdout
+        in get_plain_output(result)
     )
 
 
@@ -394,7 +381,7 @@ def test_cli_policy_run_logs_dry_run_match(runtime: Mock) -> None:
     runtime.run_continuously.return_value = iter(
         [
             RuleEvaluationResult(
-                matched_rule=_make_rule("Shutdown"), action_triggered=True
+                matched_rule=make_rule_with_actions("Shutdown"), action_triggered=True
             )
         ]
     )
@@ -404,7 +391,7 @@ def test_cli_policy_run_logs_dry_run_match(runtime: Mock) -> None:
     assert result.exit_code == 0
     assert (
         "[DRY RUN] Rule 'Test rule' matched, would have executed actions: 'Shutdown'"
-        in result.stdout
+        in get_plain_output(result)
     )
     runtime.run_continuously.assert_called_once_with(
         configuration_path=Path("powerrules.yaml"),
@@ -417,26 +404,34 @@ def test_cli_policy_run_logs_stopping_evaluation_on_stop_on_match(
     runtime: Mock,
 ) -> None:
     runtime.run_continuously.return_value = iter(
-        [RuleEvaluationResult(matched_rule=_make_rule(), action_triggered=True)]
+        [
+            RuleEvaluationResult(
+                matched_rule=make_rule_with_actions(), action_triggered=True
+            )
+        ]
     )
 
     result = runner.invoke(app, ["policy", "run", "--stop-on-match"])
 
     assert result.exit_code == 0
-    assert "Rule matched, stopping evaluation" in result.stdout
+    assert "Rule matched, stopping evaluation" in get_plain_output(result)
 
 
 def test_cli_policy_run_does_not_log_stopping_without_stop_on_match(
     runtime: Mock,
 ) -> None:
     runtime.run_continuously.return_value = iter(
-        [RuleEvaluationResult(matched_rule=_make_rule(), action_triggered=True)]
+        [
+            RuleEvaluationResult(
+                matched_rule=make_rule_with_actions(), action_triggered=True
+            )
+        ]
     )
 
     result = runner.invoke(app, ["policy", "run"])
 
     assert result.exit_code == 0
-    assert "stopping evaluation" not in result.stdout
+    assert "stopping evaluation" not in get_plain_output(result)
 
 
 def test_cli_policy_run_does_not_log_when_no_match(runtime: Mock) -> None:
@@ -447,11 +442,11 @@ def test_cli_policy_run_does_not_log_when_no_match(runtime: Mock) -> None:
     result = runner.invoke(app, ["policy", "run", "--stop-on-match"])
 
     assert result.exit_code == 0
-    assert "matched" not in result.stdout
+    assert "matched" not in get_plain_output(result)
 
 
 def test_cli_policy_run_does_not_log_repeated_match(runtime: Mock) -> None:
-    rule = _make_rule()
+    rule = make_rule_with_actions()
     runtime.run_continuously.return_value = iter(
         [
             RuleEvaluationResult(matched_rule=rule, action_triggered=True),
@@ -490,4 +485,4 @@ def test_cli_policy_run_reports_runtime_errors(
     result = runner.invoke(app, ["policy", "run"])
 
     assert result.exit_code == EXIT_RUNTIME_ERROR
-    assert message in result.output
+    assert message in get_plain_output(result, "output")

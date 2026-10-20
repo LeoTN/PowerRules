@@ -1,25 +1,13 @@
 import logging
-from collections.abc import Iterator
-from datetime import datetime
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
-from powerrules.application.runtime import PlatformProviders, PowerRulesRuntime
-from powerrules.application.trust import trust_policy
 from powerrules.engine.exceptions import FileIntegrityError, PolicyNotTrustedError
-from powerrules.engine.rule_engine import RuleEngine
-from powerrules.trust.checker import PolicyTrustChecker
 from powerrules.trust.store import TrustStore
-from tests.mocks import (
-    make_clock_provider,
-    make_command_provider,
-    make_process_provider,
-    make_window_provider,
-)
-
-NOW = datetime(2026, 10, 17, 12, 0)
+from tests.factories import build_trusted_rule_engine, trust_policy_with_fixed_time
+from tests.helpers import create_symlink, get_commands, write_file, write_policy
 
 POLICY = """
 rules:
@@ -66,130 +54,88 @@ rules:
 """
 
 
-@pytest.fixture
-def command_provider() -> Iterator[Mock]:
-    provider = make_command_provider()
-    providers = PlatformProviders(
-        clock=make_clock_provider(NOW),
-        process=make_process_provider(),
-        window=make_window_provider(),
-        command=provider,
-    )
-
-    with patch(
-        "powerrules.application.runtime.get_platform_providers",
-        return_value=providers,
-    ):
-        yield provider
-
-
-@pytest.fixture
-def store(tmp_path: Path) -> TrustStore:
-    return TrustStore(tmp_path / "store" / "trust.json")
-
-
-@pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    directory = tmp_path / "workspace"
-    (directory / "scripts").mkdir(parents=True)
-
-    for name in ("backup.sh", "disabled.sh"):
-        (directory / "scripts" / name).write_text(f"echo {name}", encoding="utf-8")
-
-    return directory.resolve()
-
-
-def _write_policy(workspace: Path, content: str = POLICY) -> Path:
-    policy = workspace / "powerrules.yaml"
-    policy.write_text(content, encoding="utf-8")
-
-    return policy
-
-
-def _trust(store: TrustStore, policy: Path) -> None:
-    trust_policy(policy, store, make_clock_provider(NOW))
-
-
-def _build_engine(
-    store: TrustStore, policy: Path, *, require_trust: bool = True
-) -> RuleEngine:
-    runtime = PowerRulesRuntime(
-        trust_checker=PolicyTrustChecker(store, require_trust=require_trust)
-    )
-
-    return runtime._build_rule_engine(policy)
-
-
-def _get_commands(command_provider: Mock) -> list[str]:
-    return [call.args[0].command for call in command_provider.run.call_args_list]
-
-
-@pytest.mark.usefixtures("command_provider")
-def test_trusted_policy_runs_all_actions(
-    store: TrustStore, workspace: Path, command_provider: Mock
+def _modify_script(
+    workspace: Path,
+    name: str = "backup.sh",
 ) -> None:
-    policy = _write_policy(workspace)
-    _trust(store, policy)
+    """Change the content of a script of the workspace, so it no longer matches the trusted digest."""
+    write_file(workspace / "scripts" / name, "echo changed")
 
-    result = _build_engine(store, policy).evaluate()
+
+def test_trusted_policy_runs_all_actions(
+    trust_store: TrustStore, workspace: Path, command_provider: Mock
+) -> None:
+    policy = write_policy(workspace, POLICY)
+    trust_policy_with_fixed_time(trust_store, policy)
+
+    result = build_trusted_rule_engine(trust_store, policy).evaluate()
 
     assert result.action_triggered is True
-    assert _get_commands(command_provider) == ["backup", "last"]
+    assert get_commands(command_provider) == ["backup", "last"]
 
 
 def test_untrusted_policy_is_rejected_when_loading(
-    store: TrustStore, workspace: Path, command_provider: Mock
+    trust_store: TrustStore, workspace: Path, command_provider: Mock
 ) -> None:
-    policy = _write_policy(workspace)
+    policy = write_policy(workspace, POLICY)
 
     with pytest.raises(PolicyNotTrustedError):
-        _build_engine(store, policy)
+        build_trusted_rule_engine(trust_store, policy)
 
     command_provider.run.assert_not_called()
 
 
 def test_modified_policy_is_rejected_when_loading(
-    store: TrustStore, workspace: Path
+    trust_store: TrustStore, workspace: Path
 ) -> None:
-    policy = _write_policy(workspace)
-    _trust(store, policy)
-    policy.write_text(POLICY + "\n# changed\n", encoding="utf-8")
+    policy = write_policy(workspace, POLICY)
+    trust_policy_with_fixed_time(trust_store, policy)
+    write_policy(workspace, POLICY + "\n# changed\n")
 
     with pytest.raises(PolicyNotTrustedError):
-        _build_engine(store, policy)
+        build_trusted_rule_engine(trust_store, policy)
 
 
 def test_modified_trusted_file_is_rejected_when_loading(
-    store: TrustStore, workspace: Path
+    trust_store: TrustStore, workspace: Path
 ) -> None:
-    policy = _write_policy(workspace)
-    _trust(store, policy)
-    (workspace / "scripts" / "backup.sh").write_text("echo changed", encoding="utf-8")
+    policy = write_policy(workspace, POLICY)
+    trust_policy_with_fixed_time(trust_store, policy)
+    _modify_script(workspace)
 
     with pytest.raises(PolicyNotTrustedError):
-        _build_engine(store, policy)
+        build_trusted_rule_engine(trust_store, policy)
 
 
 def test_trusted_file_of_disabled_rule_is_checked_when_loading(
-    store: TrustStore, workspace: Path
+    trust_store: TrustStore, workspace: Path
 ) -> None:
-    policy = _write_policy(workspace, POLICY_WITH_DISABLED_RULE)
-    _trust(store, policy)
-    (workspace / "scripts" / "disabled.sh").write_text("echo changed", encoding="utf-8")
+    policy = write_policy(workspace, POLICY_WITH_DISABLED_RULE)
+    trust_policy_with_fixed_time(trust_store, policy)
+    _modify_script(workspace, "disabled.sh")
 
     with pytest.raises(PolicyNotTrustedError):
-        _build_engine(store, policy)
+        build_trusted_rule_engine(trust_store, policy)
 
 
+# A failure which is tolerated by "continue_on_error" must never hide a modified file
+@pytest.mark.parametrize(
+    "policy_content",
+    [POLICY, POLICY_WITH_CONTINUE_ON_ERROR],
+    ids=["default", "continue_on_error"],
+)
 def test_file_modified_after_loading_prevents_the_action_from_running(
-    store: TrustStore, workspace: Path, command_provider: Mock
+    trust_store: TrustStore,
+    workspace: Path,
+    command_provider: Mock,
+    policy_content: str,
 ) -> None:
-    policy = _write_policy(workspace)
-    _trust(store, policy)
-    engine = _build_engine(store, policy)
+    policy = write_policy(workspace, policy_content)
+    trust_policy_with_fixed_time(trust_store, policy)
+    engine = build_trusted_rule_engine(trust_store, policy)
 
     # The policy was loaded and approved, the file changes afterwards
-    (workspace / "scripts" / "backup.sh").write_text("echo changed", encoding="utf-8")
+    _modify_script(workspace)
 
     with pytest.raises(FileIntegrityError, match="was modified since it was trusted"):
         engine.evaluate()
@@ -198,39 +144,21 @@ def test_file_modified_after_loading_prevents_the_action_from_running(
     command_provider.run.assert_not_called()
 
 
-def test_file_modified_after_loading_is_not_ignored_by_continue_on_error(
-    store: TrustStore, workspace: Path, command_provider: Mock
-) -> None:
-    policy = _write_policy(workspace, POLICY_WITH_CONTINUE_ON_ERROR)
-    _trust(store, policy)
-    engine = _build_engine(store, policy)
-    (workspace / "scripts" / "backup.sh").write_text("echo changed", encoding="utf-8")
-
-    with pytest.raises(FileIntegrityError):
-        engine.evaluate()
-
-    command_provider.run.assert_not_called()
-
-
 def test_link_pointed_to_another_file_after_loading_is_detected(
-    store: TrustStore, workspace: Path, command_provider: Mock
+    trust_store: TrustStore, workspace: Path, command_provider: Mock
 ) -> None:
-    other = workspace / "scripts" / "disabled.sh"
-    script = workspace / "scripts" / "backup.sh"
+    scripts = workspace / "scripts"
+    other = scripts / "disabled.sh"
+    script = scripts / "backup.sh"
+    original = write_file(scripts / "original.sh", "echo original")
     script.unlink()
-
-    try:
-        script.symlink_to(other.parent / "original.sh")
-    except (OSError, NotImplementedError):
-        pytest.skip("Symbolic links are not available")
-
-    (other.parent / "original.sh").write_text("echo original", encoding="utf-8")
-    policy = _write_policy(workspace)
-    _trust(store, policy)
-    engine = _build_engine(store, policy)
+    create_symlink(script, original)
+    policy = write_policy(workspace, POLICY)
+    trust_policy_with_fixed_time(trust_store, policy)
+    engine = build_trusted_rule_engine(trust_store, policy)
 
     script.unlink()
-    script.symlink_to(other)
+    create_symlink(script, other)
 
     with pytest.raises(FileIntegrityError, match="is not trusted yet"):
         engine.evaluate()
@@ -239,29 +167,29 @@ def test_link_pointed_to_another_file_after_loading_is_detected(
 
 
 def test_untrusted_policy_runs_with_warning_if_trust_is_not_required(
-    store: TrustStore,
+    trust_store: TrustStore,
     workspace: Path,
     command_provider: Mock,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    policy = _write_policy(workspace)
+    policy = write_policy(workspace, POLICY)
 
     with caplog.at_level(logging.WARNING):
-        engine = _build_engine(store, policy, require_trust=False)
+        engine = build_trusted_rule_engine(trust_store, policy, require_trust=False)
         engine.evaluate()
 
     assert "not trusted" in caplog.text
-    assert _get_commands(command_provider) == ["backup", "last"]
+    assert get_commands(command_provider) == ["backup", "last"]
 
 
 def test_trust_removed_while_running_stops_actions_with_trusted_files(
-    store: TrustStore, workspace: Path, command_provider: Mock
+    trust_store: TrustStore, workspace: Path, command_provider: Mock
 ) -> None:
-    policy = _write_policy(workspace)
-    _trust(store, policy)
-    engine = _build_engine(store, policy)
+    policy = write_policy(workspace, POLICY)
+    trust_policy_with_fixed_time(trust_store, policy)
+    engine = build_trusted_rule_engine(trust_store, policy)
 
-    store.untrust(policy)
+    trust_store.untrust(policy)
 
     with pytest.raises(FileIntegrityError, match="is not trusted yet"):
         engine.evaluate()

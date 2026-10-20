@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import pytest
@@ -14,3 +15,8 @@ def _run_cli_tests_in_tmp_path(
     written by "configure_logging()" - out of the repository working directory.
     """
     monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _capture_debug_logs(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)

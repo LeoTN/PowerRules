@@ -19,7 +19,7 @@ CHECKS: dict[str, list[str]] = {
         str(REPO_ROOT / "devscripts" / "format_comment_blocks.py"),
         "--fix",
     ],
-    "ruff check": [sys.executable, "-m", "ruff", "check", "."],
+    "ruff check --fix": [sys.executable, "-m", "ruff", "check", "--fix", "."],
     "pytest": [sys.executable, "-m", "pytest"],
 }
 

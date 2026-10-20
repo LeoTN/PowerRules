@@ -239,7 +239,7 @@ class TrustStore:
             policy_path: Path of the policy file.
             digest: Digest of the content which is trusted.
             trusted_at: The time when the policy was trusted.
-            trusted_files: Digests of the files of the policy which are trusted together with it,
+            trusted_files: Digests of the "trusted_files" within a policy,
                 keyed by their absolute path with all symbolic links resolved. The keys are normalized with "make_path_key()" when stored.
 
         Raises:
