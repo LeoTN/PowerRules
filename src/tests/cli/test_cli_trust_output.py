@@ -149,19 +149,14 @@ def test_print_trust_report_shows_reason_why_a_file_cannot_be_read(
 def test_print_trust_report_does_not_interpret_paths_as_markup(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    path = Path("/policies/[red]a[/red].yaml")
+
     print_trust_report(
-        TrustReport(
-            (
-                TrustReportEntry(
-                    Path("/policies/[red]a[/red].yaml"),
-                    TrustStatus.TRUSTED,
-                    is_policy=True,
-                ),
-            )
-        )
+        TrustReport((TrustReportEntry(path, TrustStatus.TRUSTED, is_policy=True),))
     )
 
-    assert "[red]a[\\red]" in capsys.readouterr().out
+    # The path is platform dependent (separators), but the markup tags must stay visible
+    assert str(path) in capsys.readouterr().out
 
 
 ############################
