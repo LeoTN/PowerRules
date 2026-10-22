@@ -57,7 +57,7 @@ def trust_store(trust_store_path: Path) -> TrustStore:
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
-    """A directory with the scripts "scripts/backup.sh" and "scripts/disabled.sh", with all symbolic links resolved.
+    """A directory with the scripts "scripts/backup.sh" and "scripts/test.sh", with all symbolic links resolved.
 
     The policy is not part of it. Tests write the policy they need with "write_policy()".
     """

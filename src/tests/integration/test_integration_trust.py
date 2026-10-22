@@ -7,9 +7,18 @@ import pytest
 from powerrules.engine.exceptions import FileIntegrityError, PolicyNotTrustedError
 from powerrules.trust.store import TrustStore
 from tests.factories import build_trusted_rule_engine, trust_policy_with_fixed_time
-from tests.helpers import create_symlink, get_commands, write_file, write_policy
+from tests.helpers import (
+    BACKUP_SCRIPT_NAME,
+    SCRIPT_DIRECTORY_NAME,
+    TEST_SCRIPT_NAME,
+    create_symlink,
+    get_commands,
+    modify_file,
+    write_file,
+    write_policy,
+)
 
-POLICY = """
+POLICY = f"""
 rules:
   - name: "Test rule"
     conditions:
@@ -20,7 +29,7 @@ rules:
       - name: "Backup"
         run: "backup"
         trusted_files:
-          - scripts/backup.sh
+          - scripts/{BACKUP_SCRIPT_NAME}
       - name: "Last"
         run: "last"
 """
@@ -29,7 +38,7 @@ POLICY_WITH_CONTINUE_ON_ERROR = POLICY.replace(
     'run: "backup"', 'run: "backup"\n        continue_on_error: true'
 )
 
-POLICY_WITH_DISABLED_RULE = """
+POLICY_WITH_DISABLED_RULE = f"""
 rules:
   - name: "Enabled rule"
     conditions:
@@ -39,7 +48,7 @@ rules:
     actions:
       - run: "enabled"
         trusted_files:
-          - scripts/backup.sh
+          - scripts/{BACKUP_SCRIPT_NAME}
 
   - name: "Disabled rule"
     enabled: false
@@ -50,16 +59,8 @@ rules:
     actions:
       - run: "disabled"
         trusted_files:
-          - scripts/disabled.sh
+          - scripts/{TEST_SCRIPT_NAME}
 """
-
-
-def _modify_script(
-    workspace: Path,
-    name: str = "backup.sh",
-) -> None:
-    """Change the content of a script of the workspace, so it no longer matches the trusted digest."""
-    write_file(workspace / "scripts" / name, "echo changed")
 
 
 def test_trusted_policy_runs_all_actions(
@@ -90,7 +91,7 @@ def test_modified_policy_is_rejected_when_loading(
 ) -> None:
     policy = write_policy(workspace, POLICY)
     trust_policy_with_fixed_time(trust_store, policy)
-    write_policy(workspace, POLICY + "\n# changed\n")
+    modify_file(policy)
 
     with pytest.raises(PolicyNotTrustedError):
         build_trusted_rule_engine(trust_store, policy)
@@ -101,7 +102,7 @@ def test_modified_trusted_file_is_rejected_when_loading(
 ) -> None:
     policy = write_policy(workspace, POLICY)
     trust_policy_with_fixed_time(trust_store, policy)
-    _modify_script(workspace)
+    modify_file(workspace / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME)
 
     with pytest.raises(PolicyNotTrustedError):
         build_trusted_rule_engine(trust_store, policy)
@@ -112,7 +113,7 @@ def test_trusted_file_of_disabled_rule_is_checked_when_loading(
 ) -> None:
     policy = write_policy(workspace, POLICY_WITH_DISABLED_RULE)
     trust_policy_with_fixed_time(trust_store, policy)
-    _modify_script(workspace, "disabled.sh")
+    modify_file(workspace / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME)
 
     with pytest.raises(PolicyNotTrustedError):
         build_trusted_rule_engine(trust_store, policy)
@@ -135,7 +136,7 @@ def test_file_modified_after_loading_prevents_the_action_from_running(
     engine = build_trusted_rule_engine(trust_store, policy)
 
     # The policy was loaded and approved, the file changes afterwards
-    _modify_script(workspace)
+    modify_file(workspace / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME)
 
     with pytest.raises(FileIntegrityError, match="was modified since it was trusted"):
         engine.evaluate()
@@ -147,9 +148,9 @@ def test_file_modified_after_loading_prevents_the_action_from_running(
 def test_link_pointed_to_another_file_after_loading_is_detected(
     trust_store: TrustStore, workspace: Path, command_provider: Mock
 ) -> None:
-    scripts = workspace / "scripts"
-    other = scripts / "disabled.sh"
-    script = scripts / "backup.sh"
+    scripts = workspace / SCRIPT_DIRECTORY_NAME
+    other = scripts / TEST_SCRIPT_NAME
+    script = scripts / BACKUP_SCRIPT_NAME
     original = write_file(scripts / "original.sh", "echo original")
     script.unlink()
     create_symlink(script, original)

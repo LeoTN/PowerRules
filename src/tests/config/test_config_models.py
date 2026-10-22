@@ -16,8 +16,12 @@ from powerrules.config.models import (
     TimeRangeConfiguration,
 )
 from powerrules.providers.command import Shell
-from tests.factories import make_action_configuration
-from tests.helpers import make_rule_data, make_trusted_files_rule_data
+from tests.factories import (
+    make_action_configuration,
+    make_rule_data,
+    make_trusted_files_rule_data,
+)
+from tests.helpers import BACKUP_SCRIPT_NAME, SCRIPT_DIRECTORY_NAME
 
 
 def test_rule_set_configuration_accepts_valid_rule() -> None:
@@ -215,10 +219,10 @@ def test_action_configuration_does_not_share_mutable_defaults() -> None:
 
 def test_action_configuration_accepts_all_options() -> None:
     action = make_action_configuration(
-        run="backup.sh",
+        run=BACKUP_SCRIPT_NAME,
         name="Backup",
         shell="bash",
-        working_directory="scripts",
+        working_directory=SCRIPT_DIRECTORY_NAME,
         env={"KEY": "value"},
         timeout=2.5,
         success_exit_codes=[0, 3],
@@ -226,10 +230,10 @@ def test_action_configuration_accepts_all_options() -> None:
         continue_on_error=True,
     )
 
-    assert action.run == "backup.sh"
+    assert action.run == BACKUP_SCRIPT_NAME
     assert action.name == "Backup"
     assert action.shell is Shell.BASH
-    assert action.working_directory == Path("scripts")
+    assert action.working_directory == Path(SCRIPT_DIRECTORY_NAME)
     assert action.env == {"KEY": "value"}
     assert action.timeout == 2.5
     assert action.success_exit_codes == [0, 3]

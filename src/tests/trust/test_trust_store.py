@@ -23,7 +23,14 @@ from powerrules.trust.store import (
     make_path_key,
     resolve_trusted_files,
 )
-from tests.helpers import TRUSTED_AT, create_symlink, lowercase_normcase
+from tests.helpers import (
+    BACKUP_SCRIPT_NAME,
+    SCRIPT_DIRECTORY_NAME,
+    TRUSTED_AT,
+    create_symlink,
+    lowercase_normcase,
+    write_file,
+)
 
 MODULE = "powerrules.trust.store"
 
@@ -88,7 +95,7 @@ def test_make_path_key_resolves_relative_paths(
 
 def test_make_path_key_resolves_symbolic_links(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
-    target.write_text("content", encoding="utf-8")
+    write_file(target)
     link = tmp_path / "link.txt"
     create_symlink(link, target)
 
@@ -113,7 +120,7 @@ def test_resolve_trusted_files_resolves_relative_paths_against_base_directory(
     tmp_path: Path,
 ) -> None:
     assert resolve_trusted_files(tmp_path, [Path("scripts/a.sh")]) == (
-        tmp_path.resolve() / "scripts" / "a.sh",
+        tmp_path.resolve() / SCRIPT_DIRECTORY_NAME / "a.sh",
     )
 
 
@@ -145,7 +152,7 @@ def test_resolve_trusted_files_treats_symbolic_link_and_target_as_duplicates(
     tmp_path: Path,
 ) -> None:
     target = tmp_path / "target.sh"
-    target.write_text("content", encoding="utf-8")
+    write_file(target)
     create_symlink(tmp_path / "link.sh", target)
 
     assert resolve_trusted_files(tmp_path, [Path("link.sh"), Path("target.sh")]) == (
@@ -177,8 +184,8 @@ def test_resolve_trusted_files_returns_empty_tuple_without_files(
 def test_compute_trusted_file_digests_returns_digests_by_resolved_path(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "scripts").mkdir()
-    first = tmp_path / "scripts" / "a.sh"
+    (tmp_path / SCRIPT_DIRECTORY_NAME).mkdir()
+    first = tmp_path / SCRIPT_DIRECTORY_NAME / "a.sh"
     second = tmp_path / "b.sh"
     first.write_bytes(b"first")
     second.write_bytes(b"second")
@@ -234,7 +241,7 @@ def test_trust_store_returns_saved_entry(
     trust_store: TrustStore, tmp_path: Path
 ) -> None:
     policy = (tmp_path / "powerrules.yaml").resolve()
-    script = (tmp_path / "scripts" / "backup.sh").resolve()
+    script = (tmp_path / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME).resolve()
 
     trust_store.trust(policy, "sha256:policy", TRUSTED_AT, {script: "sha256:script"})
 
@@ -285,7 +292,7 @@ def test_trust_store_replaces_existing_entry_of_same_policy(
     trust_store: TrustStore, tmp_path: Path
 ) -> None:
     policy = tmp_path / "powerrules.yaml"
-    script = (tmp_path / "backup.sh").resolve()
+    script = (tmp_path / BACKUP_SCRIPT_NAME).resolve()
 
     trust_store.trust(policy, "sha256:old", TRUSTED_AT, {script: "sha256:old-script"})
     trust_store.trust(policy, "sha256:new", TRUSTED_AT)
@@ -335,7 +342,7 @@ def test_trust_store_writes_documented_file_format(
     trust_store: TrustStore, trust_store_path: Path, tmp_path: Path
 ) -> None:
     policy = (tmp_path / "powerrules.yaml").resolve()
-    script = (tmp_path / "backup.sh").resolve()
+    script = (tmp_path / BACKUP_SCRIPT_NAME).resolve()
 
     trust_store.trust(policy, "sha256:policy", TRUSTED_AT, {script: "sha256:script"})
 

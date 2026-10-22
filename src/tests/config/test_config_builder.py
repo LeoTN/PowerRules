@@ -43,7 +43,12 @@ from tests.factories import (
     make_window_condition_configuration,
     make_window_provider,
 )
-from tests.helpers import DEFAULT_BASE_DIRECTORY, DEFAULT_NOW_SATURDAY_NOON
+from tests.helpers import (
+    BACKUP_SCRIPT_NAME,
+    DEFAULT_BASE_DIRECTORY,
+    DEFAULT_NOW_SATURDAY_NOON,
+    SCRIPT_DIRECTORY_NAME,
+)
 
 ################
 # Rule set tests
@@ -392,10 +397,10 @@ def test_builder_builds_command_action_with_defaults() -> None:
 def test_builder_passes_configured_action_options() -> None:
     action = build_command_action(
         make_action_configuration(
-            run="backup.sh",
+            run=BACKUP_SCRIPT_NAME,
             name="Backup",
             shell=Shell.BASH,
-            working_directory=Path("scripts"),
+            working_directory=Path(SCRIPT_DIRECTORY_NAME),
             env={"KEY": "value"},
             timeout=5.5,
             success_exit_codes=[0, 2],
@@ -403,10 +408,10 @@ def test_builder_passes_configured_action_options() -> None:
         )
     )
 
-    assert action.command == "backup.sh"
+    assert action.command == BACKUP_SCRIPT_NAME
     assert action.name == "Backup"
     assert action.shell is Shell.BASH
-    assert action.working_directory == DEFAULT_BASE_DIRECTORY / "scripts"
+    assert action.working_directory == DEFAULT_BASE_DIRECTORY / SCRIPT_DIRECTORY_NAME
     assert action.environment == {"KEY": "value"}
     assert action.timeout == 5.5
     assert action.success_exit_codes == frozenset({0, 2})
@@ -428,8 +433,11 @@ def test_builder_builds_action_without_time_limit() -> None:
 @pytest.mark.parametrize(
     ("working_directory", "expected"),
     [
-        (Path("scripts"), DEFAULT_BASE_DIRECTORY / "scripts"),
-        (Path("scripts/nightly"), DEFAULT_BASE_DIRECTORY / "scripts" / "nightly"),
+        (Path(SCRIPT_DIRECTORY_NAME), DEFAULT_BASE_DIRECTORY / SCRIPT_DIRECTORY_NAME),
+        (
+            Path("scripts/nightly"),
+            DEFAULT_BASE_DIRECTORY / SCRIPT_DIRECTORY_NAME / "nightly",
+        ),
         (Path("../shared"), DEFAULT_BASE_DIRECTORY / ".." / "shared"),
     ],
 )
@@ -550,7 +558,7 @@ def test_builder_joins_trusted_files_with_base_directory_without_resolving_them(
 
     # Symbolic links are resolved by the verifier on every check, not once here
     assert action.trusted_files == (
-        DEFAULT_BASE_DIRECTORY / "scripts" / "a.sh",
+        DEFAULT_BASE_DIRECTORY / SCRIPT_DIRECTORY_NAME / "a.sh",
         absolute_file,
     )
 

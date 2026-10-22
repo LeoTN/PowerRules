@@ -12,10 +12,17 @@ from powerrules.trust.store import (
     compute_digest,
     compute_file_digest,
 )
-from tests.factories import make_clock_provider
-from tests.helpers import TRUSTED_AT, create_symlink, make_policy_yaml, write_policy
+from tests.factories import make_clock_provider, make_policy_yaml
+from tests.helpers import (
+    BACKUP_SCRIPT_NAME,
+    SCRIPT_DIRECTORY_NAME,
+    TRUSTED_AT,
+    create_symlink,
+    modify_file,
+    write_policy,
+)
 
-POLICY_WITH_TRUSTED_FILES = """
+POLICY_WITH_TRUSTED_FILES = f"""
 rules:
   - name: "Test rule"
     conditions:
@@ -26,11 +33,11 @@ rules:
       - name: "Backup"
         run: "backup"
         trusted_files:
-          - scripts/backup.sh
+          - scripts/{BACKUP_SCRIPT_NAME}
       - name: "Other"
         run: "other"
         trusted_files:
-          - scripts/./backup.sh
+          - scripts/./{BACKUP_SCRIPT_NAME}
 """
 
 
@@ -38,7 +45,7 @@ def test_trust_policy_trusts_policy_and_files(
     trust_store: TrustStore, workspace: Path
 ) -> None:
     policy = write_policy(workspace, POLICY_WITH_TRUSTED_FILES)
-    script = workspace / "scripts" / "backup.sh"
+    script = workspace / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME
 
     report = trust_policy(policy, trust_store, make_clock_provider(TRUSTED_AT))
 
@@ -70,9 +77,9 @@ def test_trust_policy_trusts_the_modified_content_again(
     trust_store: TrustStore, workspace: Path
 ) -> None:
     policy = write_policy(workspace, POLICY_WITH_TRUSTED_FILES)
-    script = workspace / "scripts" / "backup.sh"
+    script = workspace / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME
     trust_policy(policy, trust_store, make_clock_provider(TRUSTED_AT))
-    script.write_text("echo changed", encoding="utf-8")
+    modify_file(script)
 
     report = trust_policy(policy, trust_store, make_clock_provider(TRUSTED_AT))
 
@@ -159,7 +166,7 @@ def test_trust_policy_rejects_missing_policy(
 def test_trust_policy_rejects_missing_trusted_file_without_saving_anything(
     trust_store: TrustStore, workspace: Path
 ) -> None:
-    (workspace / "scripts" / "backup.sh").unlink()
+    (workspace / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME).unlink()
     policy = write_policy(workspace, POLICY_WITH_TRUSTED_FILES)
 
     with pytest.raises(FileIntegrityError, match="cannot be read"):

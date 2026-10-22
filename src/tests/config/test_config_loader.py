@@ -10,13 +10,32 @@ from powerrules.config.loader import ConfigurationLoader
 from powerrules.config.models import DateRangeConfiguration, DateTimeRangeConfiguration
 from powerrules.engine.exceptions import PolicyNotTrustedError
 from powerrules.providers.command import Shell
-from tests.factories import make_trust_checker
-from tests.helpers import (
-    POLICY_WITH_DUPLICATE_FILES,
-    create_symlink,
+from tests.factories import (
     make_policy_yaml,
+    make_trust_checker,
+)
+from tests.helpers import (
+    SCRIPT_DIRECTORY_NAME,
+    create_symlink,
     write_policy,
 )
+
+POLICY_WITH_DUPLICATE_FILES = """
+rules:
+  - name: "Test rule"
+    conditions:
+      process:
+        name: "backup.exe"
+        exists: false
+    actions:
+      - run: "first"
+        trusted_files:
+          - scripts/a.sh
+      - run: "second"
+        trusted_files:
+          - ./scripts/a.sh
+          - b.sh
+"""
 
 
 def test_configuration_loader_loads_valid_configuration(tmp_path: Path) -> None:
@@ -111,7 +130,7 @@ rules:
     assert first_action.name == "Backup"
     assert first_action.run == "echo one\necho two\n"
     assert first_action.shell is Shell.BASH
-    assert first_action.working_directory == Path("scripts")
+    assert first_action.working_directory == Path(SCRIPT_DIRECTORY_NAME)
     # Unquoted YAML numbers and booleans are converted to strings
     assert first_action.env == {
         "RETRIES": "3",
@@ -325,7 +344,10 @@ def test_loader_verifies_policy_content_and_unique_resolved_files(
     checker.verify.assert_called_once_with(
         policy.resolve(),
         policy.read_bytes(),
-        (tmp_path.resolve() / "scripts" / "a.sh", tmp_path.resolve() / "b.sh"),
+        (
+            tmp_path.resolve() / SCRIPT_DIRECTORY_NAME / "a.sh",
+            tmp_path.resolve() / "b.sh",
+        ),
     )
 
 

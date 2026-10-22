@@ -16,7 +16,9 @@ from tests.helpers import (
     corrupt_trust_store,
     create_symlink,
     get_log_messages,
+    modify_file,
     trust_current_content,
+    write_resolved_file,
 )
 
 LOGGER_NAME = "powerrules.trust.checker"
@@ -74,7 +76,7 @@ def test_checker_rejects_modified_trusted_file(
     trust_store: TrustStore, policy: Path, script: Path
 ) -> None:
     trust_current_content(trust_store, policy, script)
-    script.write_text("echo changed", encoding="utf-8")
+    modify_file(script)
 
     with pytest.raises(PolicyNotTrustedError):
         PolicyTrustChecker(trust_store, require_trust=True).verify(
@@ -211,7 +213,7 @@ def test_checker_rejects_file_which_was_modified_after_trusting(
     trust_store: TrustStore, policy: Path, script: Path
 ) -> None:
     trust_current_content(trust_store, policy, script)
-    script.write_text("echo changed", encoding="utf-8")
+    modify_file(script)
 
     with pytest.raises(FileIntegrityError, match="was modified since it was trusted"):
         PolicyTrustChecker(trust_store, require_trust=True).verify_files(
@@ -255,11 +257,10 @@ def test_checker_reports_all_problematic_files_in_one_error(
     tmp_path: Path, trust_store: TrustStore, policy: Path, script: Path
 ) -> None:
     other = tmp_path / "other.sh"
-    other.write_text("echo other", encoding="utf-8")
-    other = other.resolve()
+    write_resolved_file(other, "other")
     trust_current_content(trust_store, policy, script, other)
-    script.write_text("echo changed", encoding="utf-8")
-    other.write_text("echo changed", encoding="utf-8")
+    modify_file(script)
+    modify_file(other)
 
     with pytest.raises(FileIntegrityError) as exc_info:
         PolicyTrustChecker(trust_store, require_trust=True).verify_files(
@@ -290,7 +291,7 @@ def test_checker_only_warns_about_files_if_trust_is_not_required(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     trust_current_content(trust_store, policy, script)
-    script.write_text("echo changed", encoding="utf-8")
+    modify_file(script)
 
     with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
         PolicyTrustChecker(trust_store, require_trust=False).verify_files(
@@ -306,7 +307,7 @@ def test_checker_detects_link_which_was_pointed_to_another_file(
     tmp_path: Path, trust_store: TrustStore, policy: Path, script: Path
 ) -> None:
     other = tmp_path / "other.sh"
-    other.write_text("echo other", encoding="utf-8")
+    write_resolved_file(other, "other")
     link = tmp_path / "link.sh"
 
     create_symlink(link, script)

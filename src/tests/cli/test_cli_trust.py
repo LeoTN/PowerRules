@@ -11,14 +11,14 @@ from powerrules.trust.store import (
     TRUST_STORE_FILE_NAME,
     TrustStore,
 )
+from tests.factories import write_backup_script_policy
 from tests.helpers import (
-    BACKUP_SCRIPT_POLICY,
     BACKUP_SCRIPT_RELATIVE_PATH,
     get_plain_output,
     get_table_row,
+    modify_file,
     read_log_file,
     trust_policy_via_cli,
-    write_backup_script_policy,
 )
 
 runner = CliRunner()
@@ -87,7 +87,7 @@ def test_cli_trust_add_trusts_the_current_content_again(tmp_path: Path) -> None:
     policy_file = write_backup_script_policy(tmp_path)
     trust_policy_via_cli(policy_file)
     script = tmp_path / BACKUP_SCRIPT_RELATIVE_PATH
-    script.write_text("echo changed", encoding="utf-8")
+    modify_file(script)
 
     result = runner.invoke(app, ["trust", "add", "--policy", str(policy_file)])
 
@@ -183,7 +183,7 @@ def test_cli_trust_list_shows_current_status_of_every_policy(tmp_path: Path) -> 
         trust_policy_via_cli(policy_file)
 
     # The trust list has to show the status which is valid now, not the one of the time of trusting
-    modified.write_text(BACKUP_SCRIPT_POLICY + "\n# changed\n", encoding="utf-8")
+    modify_file(modified)
     deleted.unlink()
 
     result = runner.invoke(app, ["trust", "list"])
@@ -216,9 +216,7 @@ def test_cli_trust_list_reports_modified_file_below_trusted_policy(
 ) -> None:
     policy_file = write_backup_script_policy(tmp_path)
     trust_policy_via_cli(policy_file)
-    (tmp_path / BACKUP_SCRIPT_RELATIVE_PATH).write_text(
-        "echo changed", encoding="utf-8"
-    )
+    modify_file(tmp_path / BACKUP_SCRIPT_RELATIVE_PATH)
 
     result = runner.invoke(app, ["trust", "list"])
 
@@ -276,7 +274,7 @@ def test_cli_policy_validate_shows_trusted_status(tmp_path: Path) -> None:
 def test_cli_policy_validate_reports_modified_policy(tmp_path: Path) -> None:
     policy_file = write_backup_script_policy(tmp_path)
     trust_policy_via_cli(policy_file)
-    policy_file.write_text(BACKUP_SCRIPT_POLICY + "\n# changed\n", encoding="utf-8")
+    modify_file(policy_file)
 
     result = runner.invoke(app, ["policy", "validate", "--policy", str(policy_file)])
 
@@ -317,7 +315,7 @@ def test_cli_policy_run_rejects_modified_policy(
 ) -> None:
     policy_file = write_backup_script_policy(tmp_path)
     trust_policy_via_cli(policy_file)
-    policy_file.write_text(BACKUP_SCRIPT_POLICY + "\n# changed\n", encoding="utf-8")
+    modify_file(policy_file)
 
     result = runner.invoke(
         app, ["policy", "run", "--once", "--policy", str(policy_file)]
@@ -333,9 +331,7 @@ def test_cli_policy_run_rejects_modified_trusted_file(
 ) -> None:
     policy_file = write_backup_script_policy(tmp_path)
     trust_policy_via_cli(policy_file)
-    (tmp_path / BACKUP_SCRIPT_RELATIVE_PATH).write_text(
-        "echo changed", encoding="utf-8"
-    )
+    modify_file(tmp_path / BACKUP_SCRIPT_RELATIVE_PATH)
 
     result = runner.invoke(
         app, ["policy", "run", "--once", "--policy", str(policy_file)]

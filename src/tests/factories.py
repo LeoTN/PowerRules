@@ -6,7 +6,6 @@ Plain helper functions are defined in "tests.helpers", fixtures in the "conftest
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 from unittest.mock import Mock, create_autospec
 
 from pydantic import BaseModel, ValidationError
@@ -58,11 +57,13 @@ from powerrules.trust.store import (
     make_path_key,
 )
 from tests.helpers import (
+    BACKUP_SCRIPT_RELATIVE_PATH,
     DEFAULT_BASE_DIRECTORY,
     DEFAULT_NOW_SATURDAY_NOON,
     DEFAULT_WORKING_DIRECTORY,
     TRUSTED_AT,
     write_policy,
+    write_workspace_scripts,
 )
 
 # The kinds of "between" which a datetime condition configuration accepts
@@ -478,59 +479,6 @@ def make_platform_providers(
     )
 
 
-##################################
-# Platform specific mocks (ctypes)
-##################################
-
-
-def set_window_station_flags(
-    user32: Mock,
-    flags: int | None,
-) -> None:
-    """Simulate the flags of the window station which the mocked "user32" reports.
-
-    Args:
-        user32: Mocked "user32.dll".
-        flags: Flags of the window station. None simulates a failing query.
-    """
-
-    def get_information(
-        _station: object,
-        _index: int,
-        flags_reference: Any,  # result of ctypes.byref(), its type is private
-        _size: int,
-        _needed_length: object,
-    ) -> int:
-        if flags is None:
-            return 0
-
-        # "_obj" is the structure which was wrapped by ctypes.byref()
-        flags_reference._obj.dwFlags = flags
-
-        return 1
-
-    user32.GetUserObjectInformationW.side_effect = get_information
-
-
-def make_title_connection(properties: dict[int, bytes | None]) -> Mock:
-    """Create a mocked X connection which returns the given raw value for each property atom.
-
-    Args:
-        properties: Raw property values keyed by the atom of the property.
-
-    Returns:
-        A mock which knows the atoms "_NET_WM_NAME" (100) and "UTF8_STRING" (101).
-    """
-    atoms = {"_NET_WM_NAME": 100, "UTF8_STRING": 101}
-    connection = Mock()
-    connection.intern_atom.side_effect = lambda name: atoms[name]
-    connection.get_property.side_effect = lambda _window_id, property_atom, _type_atom: (
-        properties.get(property_atom)
-    )
-
-    return connection
-
-
 #######
 # Trust
 #######
@@ -929,6 +877,119 @@ def build_trusted_rule_engine(
     )
 
     return runtime._build_rule_engine(policy)
+
+
+#############
+# Policy data
+#############
+
+
+def make_policy_yaml(
+    *,
+    rule_name: str = "Test rule",
+    command: str = "echo test",
+    action_name: str | None = None,
+    trusted_files: Sequence[str] = (),
+) -> str:
+    """Create a valid policy with a single rule and a single action.
+
+    Args:
+        rule_name: Name of the rule.
+        command: Command of the action.
+        action_name: Name of the action. Unnamed if None.
+        trusted_files: Trusted files of the action.
+
+    Returns:
+        The YAML content of the policy.
+    """
+    lines = [
+        "rules:",
+        f'  - name: "{rule_name}"',
+        "    conditions:",
+        "      process:",
+        '        name: "backup.exe"',
+        "        exists: false",
+        "    actions:",
+        f'      - run: "{command}"',
+    ]
+
+    if action_name is not None:
+        lines.append(f'        name: "{action_name}"')
+
+    if trusted_files:
+        lines.append("        trusted_files:")
+        lines.extend(f"          - {file}" for file in trusted_files)
+
+    return "\n".join(lines) + "\n"
+
+
+# A valid policy whose only action trusts the script "backup.sh"
+BACKUP_SCRIPT_POLICY = make_policy_yaml(
+    action_name="Backup", trusted_files=[BACKUP_SCRIPT_RELATIVE_PATH]
+)
+
+
+def make_rule_data(**overrides: object) -> dict[str, object]:
+    """Create the raw data of a valid rule, as it is passed to the validation of the configuration.
+
+    Args:
+        **overrides: Fields which replace the defaults.
+
+    Returns:
+        The raw rule data.
+    """
+    rule: dict[str, object] = {
+        "name": "Test rule",
+        "conditions": {"process": {"name": "backup.exe", "exists": False}},
+        "actions": [{"run": "echo test"}],
+    }
+
+    return {**rule, **overrides}
+
+
+def make_trusted_files_rule_data(
+    name: str,
+    files: list[str],
+    *,
+    enabled: bool = True,
+) -> dict[str, object]:
+    """Create the raw data of a rule whose action has the given trusted files.
+
+    Args:
+        name: Name of the rule.
+        files: Configured trusted files of the action.
+        enabled: Whether the rule is enabled.
+
+    Returns:
+        The raw rule data.
+    """
+    return make_rule_data(
+        name=name,
+        enabled=enabled,
+        actions=[{"run": "echo test", "trusted_files": files}],
+    )
+
+
+def write_backup_script_policy(
+    directory: Path,
+    *,
+    create_script: bool = True,
+) -> Path:
+    """Write "BACKUP_SCRIPT_POLICY" and, optionally, the scripts which it trusts, into a directory.
+
+    Args:
+        directory: Directory of the policy and the scripts. It is created if it does not exist.
+        create_script: Whether the trusted scripts are written as well.
+
+    Returns:
+        The path of the policy file.
+    """
+    policy_file = write_policy(directory, BACKUP_SCRIPT_POLICY)
+
+    if create_script:
+        write_workspace_scripts(directory)
+
+    return policy_file
 
 
 ###############

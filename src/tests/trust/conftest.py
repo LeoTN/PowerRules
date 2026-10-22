@@ -2,8 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers import write_resolved_file
-from tests.trust.test_trust_checker import EMPTY_POLICY_CONTENT
+from tests.helpers import BACKUP_SCRIPT_NAME, EMPTY_POLICY_CONTENT, write_resolved_file
 
 
 @pytest.fixture
@@ -16,4 +15,4 @@ def policy(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def script(tmp_path: Path) -> Path:
-    return write_resolved_file(tmp_path / "backup.sh", "echo backup")
+    return write_resolved_file(tmp_path / BACKUP_SCRIPT_NAME, "echo backup")

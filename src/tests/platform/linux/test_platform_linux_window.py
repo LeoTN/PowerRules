@@ -11,7 +11,6 @@ from powerrules.platform.linux.window import (
     LinuxWindowProvider,
     _XcbConnection,
 )
-from tests.factories import make_title_connection
 
 MODULE = "powerrules.platform.linux.window"
 
@@ -50,6 +49,25 @@ def connection(xcb_class: Mock) -> Mock:
 def x11_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
     monkeypatch.setenv("DISPLAY", ":0")
+
+
+def make_title_connection(properties: dict[int, bytes | None]) -> Mock:
+    """Create a mocked X connection which returns the given raw value for each property atom.
+
+    Args:
+        properties: Raw property values keyed by the atom of the property.
+
+    Returns:
+        A mock which knows the atoms "_NET_WM_NAME" (100) and "UTF8_STRING" (101).
+    """
+    atoms = {"_NET_WM_NAME": 100, "UTF8_STRING": 101}
+    connection = Mock()
+    connection.intern_atom.side_effect = lambda name: atoms[name]
+    connection.get_property.side_effect = lambda _window_id, property_atom, _type_atom: (
+        properties.get(property_atom)
+    )
+
+    return connection
 
 
 #########################

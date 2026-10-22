@@ -10,21 +10,12 @@ from powerrules.cli.app import app
 from powerrules.cli.errors import EXIT_POLICY_ERROR, EXIT_RUNTIME_ERROR
 from powerrules.engine.exceptions import ActionExecutionError, ConditionEvaluationError
 from powerrules.engine.models import RuleEvaluationResult
-from tests.factories import make_rule_with_actions
+from tests.factories import make_policy_yaml, make_rule_with_actions
 from tests.helpers import get_plain_output, write_policy
 
 runner = CliRunner()
 
-VALID_POLICY = """
-rules:
-  - name: "Test rule"
-    conditions:
-      process:
-        name: "backup.exe"
-        exists: false
-    actions:
-      - run: "echo test"
-"""
+VALID_POLICY = make_policy_yaml()
 
 
 @pytest.fixture

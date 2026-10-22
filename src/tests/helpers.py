@@ -8,7 +8,6 @@ import logging
 import os
 import shutil
 import sys
-from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -44,6 +43,7 @@ EMPTY_POLICY_CONTENT = b"rules: []\n"
 # The scripts lie in this directory next to the policy. "BACKUP_SCRIPT_POLICY" trusts the backup script
 SCRIPT_DIRECTORY_NAME = "scripts"
 BACKUP_SCRIPT_NAME = "backup.sh"
+TEST_SCRIPT_NAME = "test.sh"
 # Relative to the directory of the policy, written with a forward slash like in a policy
 BACKUP_SCRIPT_RELATIVE_PATH = f"{SCRIPT_DIRECTORY_NAME}/{BACKUP_SCRIPT_NAME}"
 
@@ -116,11 +116,8 @@ def write_policy(
     return write_file(directory / file_name, content)
 
 
-SCRIPT_DIRECTORY_NAME = "scripts"
-
-
 def write_workspace_scripts(directory: Path) -> Path:
-    """Write the scripts "scripts/backup.sh" and "scripts/disabled.sh" into a directory.
+    """Write the scripts "scripts/backup.sh" and "scripts/test.sh" into a directory.
 
     Args:
         directory: Directory which receives the "scripts" folder. It is created if it does not exist.
@@ -128,7 +125,7 @@ def write_workspace_scripts(directory: Path) -> Path:
     Returns:
         The directory with all symbolic links resolved.
     """
-    for name in (BACKUP_SCRIPT_NAME, "disabled.sh"):
+    for name in (BACKUP_SCRIPT_NAME, TEST_SCRIPT_NAME):
         write_file(directory / SCRIPT_DIRECTORY_NAME / name, f"echo {name}")
 
     return directory.resolve()
@@ -162,134 +159,14 @@ def lowercase_normcase(path: str | os.PathLike[str]) -> str:
     return os.fspath(path).lower()
 
 
-#############
-# Policy data
-#############
-
-POLICY_WITH_DUPLICATE_FILES = """
-rules:
-  - name: "Test rule"
-    conditions:
-      process:
-        name: "backup.exe"
-        exists: false
-    actions:
-      - run: "first"
-        trusted_files:
-          - scripts/a.sh
-      - run: "second"
-        trusted_files:
-          - ./scripts/a.sh
-          - b.sh
-"""
-
-
-def make_policy_yaml(
-    *,
-    rule_name: str = "Test rule",
-    command: str = "echo test",
-    action_name: str | None = None,
-    trusted_files: Sequence[str] = (),
-) -> str:
-    """Create a valid policy with a single rule and a single action.
+def modify_file(path: Path) -> None:
+    """Append a comment line to a file, so its digest no longer matches a trusted one.
 
     Args:
-        rule_name: Name of the rule.
-        command: Command of the action.
-        action_name: Name of the action. Unnamed if None.
-        trusted_files: Trusted files of the action.
-
-    Returns:
-        The YAML content of the policy.
+        path: Existing script or policy file.
     """
-    lines = [
-        "rules:",
-        f'  - name: "{rule_name}"',
-        "    conditions:",
-        "      process:",
-        '        name: "backup.exe"',
-        "        exists: false",
-        "    actions:",
-        f'      - run: "{command}"',
-    ]
-
-    if action_name is not None:
-        lines.append(f'        name: "{action_name}"')
-
-    if trusted_files:
-        lines.append("        trusted_files:")
-        lines.extend(f"          - {file}" for file in trusted_files)
-
-    return "\n".join(lines) + "\n"
-
-
-# A valid policy whose only action trusts the script "backup.sh"
-BACKUP_SCRIPT_POLICY = make_policy_yaml(
-    action_name="Backup", trusted_files=[BACKUP_SCRIPT_RELATIVE_PATH]
-)
-
-
-def make_rule_data(**overrides: object) -> dict[str, object]:
-    """Create the raw data of a valid rule, as it is passed to the validation of the configuration.
-
-    Args:
-        **overrides: Fields which replace the defaults.
-
-    Returns:
-        The raw rule data.
-    """
-    rule: dict[str, object] = {
-        "name": "Test rule",
-        "conditions": {"process": {"name": "backup.exe", "exists": False}},
-        "actions": [{"run": "echo test"}],
-    }
-
-    return {**rule, **overrides}
-
-
-def make_trusted_files_rule_data(
-    name: str,
-    files: list[str],
-    *,
-    enabled: bool = True,
-) -> dict[str, object]:
-    """Create the raw data of a rule whose action has the given trusted files.
-
-    Args:
-        name: Name of the rule.
-        files: Configured trusted files of the action.
-        enabled: Whether the rule is enabled.
-
-    Returns:
-        The raw rule data.
-    """
-    return make_rule_data(
-        name=name,
-        enabled=enabled,
-        actions=[{"run": "echo test", "trusted_files": files}],
-    )
-
-
-def write_backup_script_policy(
-    directory: Path,
-    *,
-    create_script: bool = True,
-) -> Path:
-    """Write "BACKUP_SCRIPT_POLICY" and, optionally, the scripts which it trusts, into a directory.
-
-    Args:
-        directory: Directory of the policy and the scripts. It is created if it does not exist.
-        create_script: Whether the trusted scripts are written as well.
-
-    Returns:
-        The path of the policy file.
-    """
-    policy_file = write_policy(directory, BACKUP_SCRIPT_POLICY)
-
-    if create_script:
-        write_workspace_scripts(directory)
-
-    return policy_file
+    with path.open("a", encoding="utf-8") as file:
+        file.write("\n# changed\n")
 
 
 ###############

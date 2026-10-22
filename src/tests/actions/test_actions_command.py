@@ -15,7 +15,12 @@ from tests.factories import (
     make_command_provider,
     make_files_verifier,
 )
-from tests.helpers import DEFAULT_WORKING_DIRECTORY, get_log_entries
+from tests.helpers import (
+    BACKUP_SCRIPT_NAME,
+    DEFAULT_WORKING_DIRECTORY,
+    SCRIPT_DIRECTORY_NAME,
+    get_log_entries,
+)
 
 LOGGER_NAME = "powerrules.actions.command"
 
@@ -42,7 +47,7 @@ FAILURE_CASES = [
     ),
 ]
 
-TRUSTED_FILES = (Path("scripts") / "backup.sh",)
+TRUSTED_FILES = (Path(SCRIPT_DIRECTORY_NAME) / BACKUP_SCRIPT_NAME,)
 
 ###############
 # Request tests

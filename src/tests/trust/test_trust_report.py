@@ -18,6 +18,7 @@ from tests.helpers import (
     TRUSTED_AT,
     create_symlink,
     get_trust_statuses,
+    modify_file,
     write_resolved_file,
 )
 
@@ -82,7 +83,7 @@ def test_check_file_reports_trusted_file(script: Path) -> None:
 
 def test_check_file_reports_modified_file(script: Path) -> None:
     trusted_files = make_trusted_file_entries(script)
-    script.write_text("echo changed", encoding="utf-8")
+    modify_file(script)
 
     assert check_file(script, trusted_files).status is TrustStatus.MODIFIED
 
@@ -169,7 +170,7 @@ def test_build_trust_report_of_policy_which_was_never_trusted(
 
 def test_build_trust_report_reports_modified_policy(policy: Path, script: Path) -> None:
     entry = make_trust_entry(policy, script)
-    policy.write_text("rules: [] # changed", encoding="utf-8")
+    modify_file(policy)
 
     report = build_trust_report(policy, compute_file_digest(policy), entry, (script,))
 
@@ -180,7 +181,7 @@ def test_build_trust_report_reports_modified_policy(policy: Path, script: Path) 
 
 def test_build_trust_report_reports_modified_file(policy: Path, script: Path) -> None:
     entry = make_trust_entry(policy, script)
-    script.write_text("echo changed", encoding="utf-8")
+    modify_file(script)
 
     report = build_trust_report(policy, compute_file_digest(policy), entry, (script,))
 
@@ -255,8 +256,8 @@ def test_build_entry_report_reports_modified_policy_and_file(
     policy: Path, script: Path
 ) -> None:
     entry = make_trust_entry(policy, script)
-    policy.write_text("rules: [] # changed", encoding="utf-8")
-    script.write_text("echo changed", encoding="utf-8")
+    modify_file(policy)
+    modify_file(script)
 
     assert get_trust_statuses(build_entry_report(entry)) == [
         TrustStatus.MODIFIED,

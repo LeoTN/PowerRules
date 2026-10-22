@@ -15,7 +15,12 @@ from powerrules.engine.exceptions import (
 from powerrules.platform.command import SubprocessCommandProvider
 from powerrules.providers.command import CommandResult, Shell
 from tests.factories import build_rule_engine_from_policy, make_command_provider
-from tests.helpers import get_commands, posix_only
+from tests.helpers import (
+    BACKUP_SCRIPT_NAME,
+    SCRIPT_DIRECTORY_NAME,
+    get_commands,
+    posix_only,
+)
 
 BACKUP_POLICY = """
 rules:
@@ -493,14 +498,14 @@ def test_rule_execution_passes_action_options_to_command_provider(
     command_provider = make_command_provider()
     engine = build_rule_engine_from_policy(
         tmp_path,
-        """
+        f"""
 rules:
   - name: "Options rule"
     conditions:
       datetime:
         weekday: [Saturday]
     actions:
-      - run: "backup.sh"
+      - run: "{BACKUP_SCRIPT_NAME}"
         shell: bash
         working_directory: scripts
         env:
@@ -514,9 +519,9 @@ rules:
     engine.evaluate()
 
     request = command_provider.run.call_args.args[0]
-    assert request.command == "backup.sh"
+    assert request.command == BACKUP_SCRIPT_NAME
     assert request.shell is Shell.BASH
-    assert request.working_directory == tmp_path / "scripts"
+    assert request.working_directory == tmp_path / SCRIPT_DIRECTORY_NAME
     assert request.environment == {
         "RETRIES": "3",
         "VERBOSE": "true",

@@ -11,7 +11,6 @@ from powerrules.platform.windows.window import (
     _WSF_VISIBLE,
     WindowsWindowProvider,
 )
-from tests.factories import set_window_station_flags
 
 
 @pytest.fixture
@@ -54,6 +53,35 @@ def win32_ctypes() -> Iterator[None]:
         ),
     ):
         yield
+
+
+def set_window_station_flags(
+    user32: Mock,
+    flags: int | None,
+) -> None:
+    """Simulate the flags of the window station which the mocked "user32" reports.
+
+    Args:
+        user32: Mocked "user32.dll".
+        flags: Flags of the window station. None simulates a failing query.
+    """
+
+    def get_information(
+        _station: object,
+        _index: int,
+        flags_reference: Any,  # result of ctypes.byref(), its type is private
+        _size: int,
+        _needed_length: object,
+    ) -> int:
+        if flags is None:
+            return 0
+
+        # "_obj" is the structure which was wrapped by ctypes.byref()
+        flags_reference._obj.dwFlags = flags
+
+        return 1
+
+    user32.GetUserObjectInformationW.side_effect = get_information
 
 
 ####################
