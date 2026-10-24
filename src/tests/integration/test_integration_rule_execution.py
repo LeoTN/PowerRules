@@ -1,8 +1,5 @@
-import shutil
-import sys
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 
@@ -10,28 +7,19 @@ from powerrules.actions.command import (
     ACTION_NAME_ENVIRONMENT_VARIABLE,
     RULE_NAME_ENVIRONMENT_VARIABLE,
 )
-from powerrules.config.builder import ConfigurationBuilder
-from powerrules.config.loader import ConfigurationLoader
 from powerrules.engine.exceptions import (
     ActionExecutionError,
     ConditionEvaluationError,
     ConditionEvaluationProviderNotAvailableError,
 )
-from powerrules.engine.rule_engine import RuleEngine
 from powerrules.platform.command import SubprocessCommandProvider
 from powerrules.providers.command import CommandResult, Shell
-from tests.mocks import (
-    make_clock_provider,
-    make_command_provider,
-    make_process_provider,
-    make_window_provider,
-)
-
-DEFAULT_NOW = datetime(2026, 8, 22, 12, 0)
-
-posix_only = pytest.mark.skipif(
-    sys.platform == "win32" or shutil.which("sh") is None,
-    reason="Requires a POSIX shell",
+from tests.factories import build_rule_engine_from_policy, make_command_provider
+from tests.helpers import (
+    BACKUP_SCRIPT_NAME,
+    SCRIPT_DIRECTORY_NAME,
+    get_commands,
+    posix_only,
 )
 
 BACKUP_POLICY = """
@@ -52,41 +40,6 @@ rules:
 """
 
 
-def _build_engine(
-    tmp_path: Path,
-    policy: str,
-    *,
-    now: datetime = DEFAULT_NOW,
-    process_names: tuple[str, ...] = (),
-    process_error: Exception | None = None,
-    window_titles: tuple[str, ...] = (),
-    window_available: bool = True,
-    command_provider: Mock | SubprocessCommandProvider | None = None,
-) -> RuleEngine:
-    """Load a policy from a file and build an engine with mocked providers."""
-    policy_file = tmp_path / "powerrules.yaml"
-    policy_file.write_text(policy, encoding="utf-8")
-
-    rule_set = ConfigurationBuilder(
-        clock_provider=make_clock_provider(now),
-        process_provider=make_process_provider(process_names, error=process_error),
-        window_provider=make_window_provider(window_titles, available=window_available),
-        command_provider=(
-            command_provider
-            if command_provider is not None
-            else make_command_provider()
-        ),
-        base_directory=tmp_path,
-    ).build(ConfigurationLoader().load(policy_file))
-
-    return RuleEngine(rule_set.rules)
-
-
-def _get_commands(command_provider: Mock) -> list[str]:
-    """Return the commands of all requests in the order in which they were run."""
-    return [call.args[0].command for call in command_provider.run.call_args_list]
-
-
 #######################
 # Matching and ordering
 #######################
@@ -94,7 +47,7 @@ def _get_commands(command_provider: Mock) -> list[str]:
 
 def test_rule_execution_runs_commands_of_matching_rule(tmp_path: Path) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         BACKUP_POLICY,
         now=datetime(2026, 8, 22, 1, 30),
@@ -121,7 +74,7 @@ def test_rule_execution_returns_no_match_outside_of_time_range(
     tmp_path: Path,
 ) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         BACKUP_POLICY,
         now=datetime(2026, 8, 22, 22, 30),
@@ -139,7 +92,7 @@ def test_rule_execution_returns_no_match_while_process_is_running(
     tmp_path: Path,
 ) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         BACKUP_POLICY,
         now=datetime(2026, 8, 22, 1, 30),
@@ -153,7 +106,7 @@ def test_rule_execution_returns_no_match_while_process_is_running(
 
 def test_rule_execution_uses_first_matching_rule(tmp_path: Path) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -183,12 +136,12 @@ rules:
 
     assert result.matched_rule is not None
     assert result.matched_rule.name == "Sleep"
-    assert _get_commands(command_provider) == ["echo sleep"]
+    assert get_commands(command_provider) == ["echo sleep"]
 
 
 def test_rule_execution_skips_disabled_rule(tmp_path: Path) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -214,7 +167,7 @@ rules:
 
     assert result.matched_rule is not None
     assert result.matched_rule.name == "Enabled rule"
-    assert _get_commands(command_provider) == ["echo enabled"]
+    assert get_commands(command_provider) == ["echo enabled"]
 
 
 def test_rule_execution_with_not_and_or_conditions(tmp_path: Path) -> None:
@@ -239,29 +192,33 @@ rules:
 
     # 2026-08-22 is a Saturday
     assert (
-        _build_engine(tmp_path, policy, command_provider=command_provider)
+        build_rule_engine_from_policy(
+            tmp_path, policy, command_provider=command_provider
+        )
         .evaluate()
         .matched_rule
         is not None
     )
 
     assert (
-        _build_engine(tmp_path, policy, process_names=("backup.exe",))
+        build_rule_engine_from_policy(tmp_path, policy, process_names=("backup.exe",))
         .evaluate()
         .matched_rule
         is None
     )
     assert (
-        _build_engine(tmp_path, policy, now=datetime(2026, 8, 21, 12, 0))
+        build_rule_engine_from_policy(
+            tmp_path, policy, now=datetime(2026, 8, 21, 12, 0)
+        )
         .evaluate()
         .matched_rule
         is None
     )
 
 
-#################################
+################################
 # Date and time based conditions
-#################################
+################################
 
 
 @pytest.mark.parametrize(
@@ -282,7 +239,7 @@ def test_rule_execution_with_date_range(
     expected_match: bool,
 ) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -323,7 +280,7 @@ def test_rule_execution_with_datetime_range_and_weekday(
     expected_match: bool,
 ) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -362,7 +319,7 @@ def test_rule_execution_with_time_range_crossing_midnight_and_month(
     current_datetime: datetime,
     expected_match: bool,
 ) -> None:
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -401,7 +358,7 @@ def test_rule_execution_with_regex_process_condition(
     process_names: tuple[str, ...],
     expected_match: bool,
 ) -> None:
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -435,13 +392,15 @@ rules:
 """
 
     assert (
-        _build_engine(tmp_path, policy, window_titles=("Mozilla Firefox",))
+        build_rule_engine_from_policy(
+            tmp_path, policy, window_titles=("Mozilla Firefox",)
+        )
         .evaluate()
         .matched_rule
         is not None
     )
     assert (
-        _build_engine(tmp_path, policy, window_titles=("Other",))
+        build_rule_engine_from_policy(tmp_path, policy, window_titles=("Other",))
         .evaluate()
         .matched_rule
         is None
@@ -452,7 +411,7 @@ def test_rule_execution_fails_when_window_provider_is_not_available(
     tmp_path: Path,
 ) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -478,7 +437,7 @@ def test_rule_execution_fails_when_condition_cannot_be_evaluated(
     tmp_path: Path,
 ) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         BACKUP_POLICY,
         now=datetime(2026, 8, 22, 1, 30),
@@ -502,7 +461,7 @@ def test_rule_execution_fails_when_condition_cannot_be_evaluated(
 
 def test_rule_execution_runs_multiple_actions_in_order(tmp_path: Path) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -522,7 +481,7 @@ rules:
 
     engine.evaluate()
 
-    assert _get_commands(command_provider) == [
+    assert get_commands(command_provider) == [
         "echo cleanup",
         "echo backup",
         "echo shutdown",
@@ -537,16 +496,16 @@ def test_rule_execution_passes_action_options_to_command_provider(
     tmp_path: Path,
 ) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
-        """
+        f"""
 rules:
   - name: "Options rule"
     conditions:
       datetime:
         weekday: [Saturday]
     actions:
-      - run: "backup.sh"
+      - run: "{BACKUP_SCRIPT_NAME}"
         shell: bash
         working_directory: scripts
         env:
@@ -560,9 +519,9 @@ rules:
     engine.evaluate()
 
     request = command_provider.run.call_args.args[0]
-    assert request.command == "backup.sh"
+    assert request.command == BACKUP_SCRIPT_NAME
     assert request.shell is Shell.BASH
-    assert request.working_directory == tmp_path / "scripts"
+    assert request.working_directory == tmp_path / SCRIPT_DIRECTORY_NAME
     assert request.environment == {
         "RETRIES": "3",
         "VERBOSE": "true",
@@ -577,7 +536,7 @@ def test_rule_execution_starts_background_action_without_waiting(
     tmp_path: Path,
 ) -> None:
     command_provider = make_command_provider(CommandResult(exit_code=None))
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -601,7 +560,7 @@ rules:
 def test_rule_execution_accepts_configured_success_exit_codes(
     tmp_path: Path,
 ) -> None:
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -638,7 +597,7 @@ def test_rule_execution_skips_remaining_actions_after_failed_action(
     tmp_path: Path,
 ) -> None:
     command_provider = make_command_provider(CommandResult(exit_code=1))
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path, FAILING_ACTIONS_POLICY, command_provider=command_provider
     )
 
@@ -648,12 +607,12 @@ def test_rule_execution_skips_remaining_actions_after_failed_action(
     ):
         engine.evaluate()
 
-    assert _get_commands(command_provider) == ["echo failing"]
+    assert get_commands(command_provider) == ["echo failing"]
 
 
 def test_rule_execution_reports_timeout_of_action(tmp_path: Path) -> None:
     command_provider = make_command_provider(error=TimeoutError())
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path, FAILING_ACTIONS_POLICY, command_provider=command_provider
     )
 
@@ -674,7 +633,7 @@ def test_rule_execution_continues_after_failed_action_with_continue_on_error(
         CommandResult(exit_code=1),
         CommandResult(exit_code=0),
     ]
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -695,12 +654,12 @@ rules:
     result = engine.evaluate()
 
     assert result.action_triggered is True
-    assert _get_commands(command_provider) == ["echo failing", "echo last"]
+    assert get_commands(command_provider) == ["echo failing", "echo last"]
 
 
 def test_rule_execution_dry_run_does_not_run_commands(tmp_path: Path) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         BACKUP_POLICY,
         now=datetime(2026, 8, 22, 1, 30),
@@ -718,7 +677,7 @@ def test_rule_execution_does_not_repeat_commands_for_unchanged_match(
     tmp_path: Path,
 ) -> None:
     command_provider = make_command_provider()
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         BACKUP_POLICY,
         now=datetime(2026, 8, 22, 1, 30),
@@ -740,7 +699,7 @@ def test_rule_execution_does_not_repeat_commands_for_unchanged_match(
 
 @posix_only
 def test_rule_execution_runs_real_command(tmp_path: Path) -> None:
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:
@@ -763,7 +722,7 @@ rules:
 
 @posix_only
 def test_rule_execution_reports_exit_code_of_real_command(tmp_path: Path) -> None:
-    engine = _build_engine(
+    engine = build_rule_engine_from_policy(
         tmp_path,
         """
 rules:

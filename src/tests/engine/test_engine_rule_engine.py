@@ -1,28 +1,10 @@
 from functools import partial
-from unittest.mock import Mock
 
 import pytest
 
 from powerrules.engine.exceptions import ActionExecutionError, ConditionEvaluationError
-from powerrules.engine.models import Rule
 from powerrules.engine.rule_engine import RuleEngine
-from tests.mocks import make_action, make_condition
-
-
-def _make_rule(
-    name: str,
-    condition: Mock,
-    *actions: Mock,
-    enabled: bool = True,
-) -> Rule:
-    """Create a rule with the given (mocked) condition and actions."""
-    return Rule(
-        name=name,
-        condition=condition,
-        actions=actions,
-        enabled=enabled,
-    )
-
+from tests.factories import make_action, make_condition, make_rule, make_rule_engine
 
 #########################
 # Rule matching and order
@@ -32,11 +14,12 @@ def _make_rule(
 def test_rule_engine_executes_action_when_condition_matches() -> None:
     condition = make_condition(True)
     action = make_action()
-    rule = _make_rule("Test rule", condition, action)
+    rule = make_rule(condition=condition, actions=[action])
 
-    result = RuleEngine((rule,)).evaluate()
+    result = make_rule_engine(rule).evaluate()
 
     assert result.matched_rule is rule
+    assert result.action_triggered is True
     condition.evaluate.assert_called_once_with()
     action.execute.assert_called_once_with()
 
@@ -44,18 +27,20 @@ def test_rule_engine_executes_action_when_condition_matches() -> None:
 def test_rule_engine_skips_non_matching_rule() -> None:
     condition = make_condition(False)
     action = make_action()
-    rule = _make_rule("Test rule", condition, action)
+    rule = make_rule(condition=condition, actions=[action])
 
-    result = RuleEngine((rule,)).evaluate()
+    result = make_rule_engine(rule).evaluate()
 
     assert result.matched_rule is None
+    assert result.action_triggered is False
     condition.evaluate.assert_called_once_with()
     action.execute.assert_not_called()
 
 
 def test_rule_engine_accepts_any_sequence_of_rules() -> None:
-    rule = _make_rule("Test rule", make_condition(True), make_action())
+    rule = make_rule()
 
+    # The engine is created directly, because a list instead of a tuple is passed on purpose
     assert RuleEngine([rule]).rules == (rule,)
 
 
@@ -67,11 +52,13 @@ def test_rule_engine_evaluates_rules_from_top_to_bottom() -> None:
     second_action = make_action()
 
     rules = (
-        _make_rule("First test rule", first_condition, first_action),
-        _make_rule("Second test rule", second_condition, second_action),
+        make_rule("First test rule", condition=first_condition, actions=[first_action]),
+        make_rule(
+            "Second test rule", condition=second_condition, actions=[second_action]
+        ),
     )
 
-    result = RuleEngine(rules).evaluate()
+    result = make_rule_engine(*rules).evaluate()
 
     assert result.matched_rule is rules[1]
     first_condition.evaluate.assert_called_once_with()
@@ -88,11 +75,13 @@ def test_rule_engine_stops_after_first_matching_rule() -> None:
     second_action = make_action()
 
     rules = (
-        _make_rule("First test rule", first_condition, first_action),
-        _make_rule("Second test rule", second_condition, second_action),
+        make_rule("First test rule", condition=first_condition, actions=[first_action]),
+        make_rule(
+            "Second test rule", condition=second_condition, actions=[second_action]
+        ),
     )
 
-    result = RuleEngine(rules).evaluate()
+    result = make_rule_engine(*rules).evaluate()
 
     assert result.matched_rule is rules[0]
     first_action.execute.assert_called_once_with()
@@ -104,9 +93,11 @@ def test_rule_engine_stops_after_first_matching_rule() -> None:
 def test_rule_engine_skips_disabled_rules() -> None:
     condition = make_condition(True)
     action = make_action()
-    rule = _make_rule("Disabled test rule", condition, action, enabled=False)
+    rule = make_rule(
+        "Disabled test rule", condition=condition, actions=[action], enabled=False
+    )
 
-    result = RuleEngine((rule,)).evaluate()
+    result = make_rule_engine(rule).evaluate()
 
     assert result.matched_rule is None
     condition.evaluate.assert_not_called()
@@ -118,12 +109,15 @@ def test_rule_engine_skips_disabled_rule_and_matches_next_rule() -> None:
     disabled_action = make_action()
     enabled_action = make_action()
 
-    disabled_rule = _make_rule(
-        "Disabled test rule", disabled_condition, disabled_action, enabled=False
+    disabled_rule = make_rule(
+        "Disabled test rule",
+        condition=disabled_condition,
+        actions=[disabled_action],
+        enabled=False,
     )
-    enabled_rule = _make_rule("Enabled test rule", make_condition(True), enabled_action)
+    enabled_rule = make_rule("Enabled test rule", actions=[enabled_action])
 
-    result = RuleEngine((disabled_rule, enabled_rule)).evaluate()
+    result = make_rule_engine(disabled_rule, enabled_rule).evaluate()
 
     assert result.matched_rule is enabled_rule
     disabled_condition.evaluate.assert_not_called()
@@ -136,11 +130,19 @@ def test_rule_engine_returns_no_match_when_no_rule_matches() -> None:
     second_action = make_action()
 
     rules = (
-        _make_rule("First test rule", make_condition(False), first_action),
-        _make_rule("Second test rule", make_condition(False), second_action),
+        make_rule(
+            "First test rule",
+            condition=make_condition(False),
+            actions=[first_action],
+        ),
+        make_rule(
+            "Second test rule",
+            condition=make_condition(False),
+            actions=[second_action],
+        ),
     )
 
-    result = RuleEngine(rules).evaluate()
+    result = make_rule_engine(*rules).evaluate()
 
     assert result.matched_rule is None
     first_action.execute.assert_not_called()
@@ -149,7 +151,7 @@ def test_rule_engine_returns_no_match_when_no_rule_matches() -> None:
 
 # This should not happen in practice due to YAML validation
 def test_rule_engine_returns_no_match_for_empty_rule_list() -> None:
-    result = RuleEngine(()).evaluate()
+    result = make_rule_engine().evaluate()
 
     assert result.matched_rule is None
     assert result.action_triggered is False
@@ -167,9 +169,7 @@ def test_rule_engine_executes_all_actions_of_the_matching_rule_in_order() -> Non
     for action in actions:
         action.execute.side_effect = partial(execution_order.append, action.name)
 
-    rule = _make_rule("Test rule", make_condition(True), *actions)
-
-    RuleEngine((rule,)).evaluate()
+    make_rule_engine(make_rule(actions=actions)).evaluate()
 
     assert execution_order == ["Action 1", "Action 2", "Action 3"]
 
@@ -179,11 +179,15 @@ def test_rule_engine_only_executes_actions_of_the_matching_rule() -> None:
     second_action = make_action("Second action")
 
     rules = (
-        _make_rule("First test rule", make_condition(False), first_action),
-        _make_rule("Second test rule", make_condition(True), second_action),
+        make_rule(
+            "First test rule",
+            condition=make_condition(False),
+            actions=[first_action],
+        ),
+        make_rule("Second test rule", actions=[second_action]),
     )
 
-    RuleEngine(rules).evaluate()
+    make_rule_engine(*rules).evaluate()
 
     first_action.execute.assert_not_called()
     second_action.execute.assert_called_once_with()
@@ -194,63 +198,44 @@ def test_rule_engine_only_executes_actions_of_the_matching_rule() -> None:
 ######################
 
 
-def test_rule_engine_propagates_condition_evaluation_error() -> None:
-    action = make_action()
-
-    rule = _make_rule(
+def test_rule_engine_propagates_condition_evaluation_error_and_stops() -> None:
+    first_action = make_action()
+    first_rule = make_rule(
         "Failing test rule",
-        make_condition(error=ConditionEvaluationError("Test condition failed")),
-        action,
-    )
-
-    with pytest.raises(ConditionEvaluationError, match="Test condition failed"):
-        RuleEngine((rule,)).evaluate()
-
-    action.execute.assert_not_called()
-
-
-def test_rule_engine_stops_after_condition_evaluation_error() -> None:
-    first_rule = _make_rule(
-        "Failing test rule",
-        make_condition(error=ConditionEvaluationError("Test condition failed")),
-        make_action(),
+        condition=make_condition(
+            error=ConditionEvaluationError("Test condition failed")
+        ),
+        actions=[first_action],
     )
 
     second_condition = make_condition(True)
     second_action = make_action()
-    second_rule = _make_rule("Second test rule", second_condition, second_action)
+    second_rule = make_rule(
+        "Second test rule", condition=second_condition, actions=[second_action]
+    )
 
-    with pytest.raises(ConditionEvaluationError):
-        RuleEngine((first_rule, second_rule)).evaluate()
+    with pytest.raises(ConditionEvaluationError, match="Test condition failed"):
+        make_rule_engine(first_rule, second_rule).evaluate()
 
+    first_action.execute.assert_not_called()
     second_condition.evaluate.assert_not_called()
     second_action.execute.assert_not_called()
 
 
-def test_rule_engine_propagates_action_execution_error() -> None:
-    rule = _make_rule(
+def test_rule_engine_propagates_action_execution_error_and_stops() -> None:
+    first_rule = make_rule(
         "Failing test rule",
-        make_condition(True),
-        make_action(error=ActionExecutionError("Test action failed")),
-    )
-
-    with pytest.raises(ActionExecutionError, match="Test action failed"):
-        RuleEngine((rule,)).evaluate()
-
-
-def test_rule_engine_stops_after_action_execution_error() -> None:
-    first_rule = _make_rule(
-        "Failing test rule",
-        make_condition(True),
-        make_action(error=ActionExecutionError("Test action failed")),
+        actions=[make_action(error=ActionExecutionError("Test action failed"))],
     )
 
     second_condition = make_condition(True)
     second_action = make_action()
-    second_rule = _make_rule("Second test rule", second_condition, second_action)
+    second_rule = make_rule(
+        "Second test rule", condition=second_condition, actions=[second_action]
+    )
 
-    with pytest.raises(ActionExecutionError):
-        RuleEngine((first_rule, second_rule)).evaluate()
+    with pytest.raises(ActionExecutionError, match="Test action failed"):
+        make_rule_engine(first_rule, second_rule).evaluate()
 
     second_condition.evaluate.assert_not_called()
     second_action.execute.assert_not_called()
@@ -263,12 +248,10 @@ def test_rule_engine_skips_remaining_actions_after_action_execution_error() -> N
     )
     last_action = make_action("Last action")
 
-    rule = _make_rule(
-        "Test rule", make_condition(True), first_action, failing_action, last_action
-    )
+    rule = make_rule(actions=[first_action, failing_action, last_action])
 
     with pytest.raises(ActionExecutionError, match="Test action failed"):
-        RuleEngine((rule,)).evaluate()
+        make_rule_engine(rule).evaluate()
 
     first_action.execute.assert_called_once_with()
     failing_action.execute.assert_called_once_with()
@@ -283,9 +266,9 @@ def test_rule_engine_skips_remaining_actions_after_action_execution_error() -> N
 def test_rule_engine_find_match_returns_matching_rule() -> None:
     condition = make_condition(True)
     action = make_action()
-    rule = _make_rule("Test rule", condition, action)
+    rule = make_rule(condition=condition, actions=[action])
 
-    matched_rule = RuleEngine((rule,)).find_match()
+    matched_rule = make_rule_engine(rule).find_match()
 
     assert matched_rule is rule
     condition.evaluate.assert_called_once_with()
@@ -294,17 +277,17 @@ def test_rule_engine_find_match_returns_matching_rule() -> None:
 
 
 def test_rule_engine_find_match_returns_none_when_no_rule_matches() -> None:
-    rule = _make_rule("Test rule", make_condition(False), make_action())
+    rule = make_rule(condition=make_condition(False))
 
-    assert RuleEngine((rule,)).find_match() is None
+    assert make_rule_engine(rule).find_match() is None
 
 
 def test_rule_engine_find_match_returns_first_matching_rule() -> None:
-    first_rule = _make_rule("First rule", make_condition(True), make_action())
+    first_rule = make_rule("First rule")
     second_condition = make_condition(True)
-    second_rule = _make_rule("Second rule", second_condition, make_action())
+    second_rule = make_rule("Second rule", condition=second_condition)
 
-    matched_rule = RuleEngine((first_rule, second_rule)).find_match()
+    matched_rule = make_rule_engine(first_rule, second_rule).find_match()
 
     assert matched_rule is first_rule
     second_condition.evaluate.assert_not_called()
@@ -315,21 +298,10 @@ def test_rule_engine_find_match_returns_first_matching_rule() -> None:
 ##########################################
 
 
-def test_rule_engine_evaluate_triggers_actions_on_first_match() -> None:
-    action = make_action()
-    rule = _make_rule("Test rule", make_condition(True), action)
-
-    result = RuleEngine((rule,)).evaluate()
-
-    assert result.matched_rule is rule
-    assert result.action_triggered is True
-    action.execute.assert_called_once_with()
-
-
 def test_rule_engine_evaluate_does_not_retrigger_same_matched_rule() -> None:
     action = make_action()
-    rule = _make_rule("Test rule", make_condition(True), action)
-    engine = RuleEngine((rule,))
+    rule = make_rule(actions=[action])
+    engine = make_rule_engine(rule)
 
     first_result = engine.evaluate()
     second_result = engine.evaluate(previous_matched_rule=first_result.matched_rule)
@@ -345,8 +317,8 @@ def test_rule_engine_evaluate_retriggers_after_no_match_in_between() -> None:
     # The rule matches, stops matching and matches again (like in a polling loop)
     condition.evaluate.side_effect = [True, False, True]
     action = make_action()
-    rule = _make_rule("Test rule", condition, action)
-    engine = RuleEngine((rule,))
+    rule = make_rule(condition=condition, actions=[action])
+    engine = make_rule_engine(rule)
 
     first_result = engine.evaluate()
     second_result = engine.evaluate(previous_matched_rule=first_result.matched_rule)
@@ -365,13 +337,14 @@ def test_rule_engine_evaluate_retriggers_when_matched_rule_changes() -> None:
     first_condition = make_condition()
     # The first rule matches only on the first evaluation
     first_condition.evaluate.side_effect = [True, False]
-    second_condition = make_condition(True)
     first_action = make_action()
     second_action = make_action()
 
-    first_rule = _make_rule("First rule", first_condition, first_action)
-    second_rule = _make_rule("Second rule", second_condition, second_action)
-    engine = RuleEngine((first_rule, second_rule))
+    first_rule = make_rule(
+        "First rule", condition=first_condition, actions=[first_action]
+    )
+    second_rule = make_rule("Second rule", actions=[second_action])
+    engine = make_rule_engine(first_rule, second_rule)
 
     first_result = engine.evaluate()
     second_result = engine.evaluate(previous_matched_rule=first_result.matched_rule)
@@ -383,17 +356,6 @@ def test_rule_engine_evaluate_retriggers_when_matched_rule_changes() -> None:
     second_action.execute.assert_called_once_with()
 
 
-def test_rule_engine_evaluate_does_not_trigger_actions_for_no_match() -> None:
-    action = make_action()
-    rule = _make_rule("Test rule", make_condition(False), action)
-
-    result = RuleEngine((rule,)).evaluate()
-
-    assert result.matched_rule is None
-    assert result.action_triggered is False
-    action.execute.assert_not_called()
-
-
 ###############
 # dry_run tests
 ###############
@@ -402,9 +364,9 @@ def test_rule_engine_evaluate_does_not_trigger_actions_for_no_match() -> None:
 def test_rule_engine_evaluate_dry_run_reports_trigger_without_executing() -> None:
     first_action = make_action("First action")
     second_action = make_action("Second action")
-    rule = _make_rule("Test rule", make_condition(True), first_action, second_action)
+    rule = make_rule(actions=[first_action, second_action])
 
-    result = RuleEngine((rule,)).evaluate(dry_run=True)
+    result = make_rule_engine(rule).evaluate(dry_run=True)
 
     assert result.matched_rule is rule
     assert result.action_triggered is True
@@ -414,8 +376,8 @@ def test_rule_engine_evaluate_dry_run_reports_trigger_without_executing() -> Non
 
 def test_rule_engine_evaluate_dry_run_does_not_retrigger_same_matched_rule() -> None:
     action = make_action()
-    rule = _make_rule("Test rule", make_condition(True), action)
-    engine = RuleEngine((rule,))
+    rule = make_rule(actions=[action])
+    engine = make_rule_engine(rule)
 
     first_result = engine.evaluate(dry_run=True)
     second_result = engine.evaluate(
@@ -441,9 +403,9 @@ def test_rule_engine_evaluate_executes_actions_only_without_dry_run(
 ) -> None:
     condition = make_condition(True)
     action = make_action()
-    rule = _make_rule("Test rule", condition, action)
+    rule = make_rule(condition=condition, actions=[action])
 
-    RuleEngine((rule,)).evaluate(dry_run=dry_run)
+    make_rule_engine(rule).evaluate(dry_run=dry_run)
 
     # The conditions are evaluated in both cases, otherwise a dry run would be meaningless
     condition.evaluate.assert_called_once_with()

@@ -1,9 +1,7 @@
 import ctypes
 import os
-import shutil
 import subprocess
-import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -17,18 +15,11 @@ from powerrules.platform.command import (
     _terminate_process_tree,
     build_shell_arguments,
 )
-from powerrules.providers.command import CommandRequest, CommandResult, Shell
+from powerrules.providers.command import CommandResult, Shell
+from tests.factories import make_command_request
+from tests.helpers import posix_only, windows_only
 
 MODULE = "powerrules.platform.command"
-
-posix_only = pytest.mark.skipif(
-    sys.platform == "win32" or shutil.which("sh") is None,
-    reason="Requires a POSIX shell",
-)
-windows_only = pytest.mark.skipif(
-    sys.platform != "win32",
-    reason="Requires Windows",
-)
 
 
 @pytest.fixture
@@ -56,26 +47,6 @@ def clear_encoding_cache() -> Iterator[None]:
     _get_output_encoding.cache_clear()
     yield
     _get_output_encoding.cache_clear()
-
-
-def _make_request(
-    working_directory: Path,
-    command: str = "echo test",
-    *,
-    environment: Mapping[str, str] | None = None,
-    timeout: float | None = None,
-    wait: bool = True,
-    shell: Shell | None = None,
-) -> CommandRequest:
-    """Create a request with the given options."""
-    return CommandRequest(
-        command=command,
-        working_directory=working_directory,
-        environment=environment if environment is not None else {},
-        timeout=timeout,
-        wait=wait,
-        shell=shell,
-    )
 
 
 #############################
@@ -243,7 +214,9 @@ def test_provider_runs_command_and_returns_result(
     process.communicate.return_value = (b"out", b"err")
     process.returncode = 3
 
-    result = SubprocessCommandProvider(Shell.SH).run(_make_request(tmp_path, timeout=7))
+    result = SubprocessCommandProvider(Shell.SH).run(
+        make_command_request(tmp_path, timeout=7)
+    )
 
     assert result == CommandResult(exit_code=3, stdout="out", stderr="err")
     process.communicate.assert_called_once_with(timeout=7)
@@ -262,7 +235,7 @@ def test_provider_passes_string_arguments_of_cmd_unchanged(
     tmp_path: Path,
 ) -> None:
     SubprocessCommandProvider(Shell.SH).run(
-        _make_request(tmp_path, "echo test", shell=Shell.CMD)
+        make_command_request(tmp_path, "echo test", shell=Shell.CMD)
     )
 
     assert popen.call_args.args[0] == 'cmd.exe /d /s /c "echo test"'
@@ -282,7 +255,7 @@ def test_provider_uses_default_shell_unless_request_defines_one(
     expected_executable: str,
 ) -> None:
     SubprocessCommandProvider(Shell.SH).run(
-        _make_request(tmp_path, shell=requested_shell)
+        make_command_request(tmp_path, shell=requested_shell)
     )
 
     assert popen.call_args.args[0][0] == expected_executable
@@ -297,7 +270,7 @@ def test_provider_extends_environment_of_current_process(
     monkeypatch.setenv("POWERRULES_TEST_OVERRIDDEN", "original")
 
     SubprocessCommandProvider(Shell.SH).run(
-        _make_request(
+        make_command_request(
             tmp_path,
             environment={
                 "POWERRULES_TEST_OVERRIDDEN": "override",
@@ -330,7 +303,7 @@ def test_provider_rejects_invalid_working_directory(
     with pytest.raises(
         NotADirectoryError, match="does not exist or is not a directory"
     ):
-        SubprocessCommandProvider(Shell.SH).run(_make_request(working_directory))
+        SubprocessCommandProvider(Shell.SH).run(make_command_request(working_directory))
 
     popen.assert_not_called()
 
@@ -344,7 +317,7 @@ def test_provider_rejects_shell_which_is_not_installed(
         pytest.raises(FileNotFoundError, match="The shell 'bash' was not found"),
     ):
         SubprocessCommandProvider(Shell.SH).run(
-            _make_request(tmp_path, shell=Shell.BASH)
+            make_command_request(tmp_path, shell=Shell.BASH)
         )
 
     which.assert_called_once_with("bash")
@@ -355,7 +328,7 @@ def test_provider_propagates_start_failure(popen: Mock, tmp_path: Path) -> None:
     popen.side_effect = PermissionError("Test permission")
 
     with pytest.raises(PermissionError, match="Test permission"):
-        SubprocessCommandProvider(Shell.SH).run(_make_request(tmp_path))
+        SubprocessCommandProvider(Shell.SH).run(make_command_request(tmp_path))
 
 
 def test_provider_kills_process_tree_and_raises_on_timeout(
@@ -371,7 +344,9 @@ def test_provider_kills_process_tree_and_raises_on_timeout(
             TimeoutError, match="Command did not finish within 1.5 seconds"
         ) as exc_info,
     ):
-        SubprocessCommandProvider(Shell.SH).run(_make_request(tmp_path, timeout=1.5))
+        SubprocessCommandProvider(Shell.SH).run(
+            make_command_request(tmp_path, timeout=1.5)
+        )
 
     terminate.assert_called_once_with(process)
     assert exc_info.value.__cause__ is timeout_error
@@ -389,7 +364,7 @@ def test_provider_starts_command_in_new_session_on_posix(
 ) -> None:
     with patch(f"{MODULE}.sys.platform", "linux"):
         result = SubprocessCommandProvider(Shell.SH).run(
-            _make_request(tmp_path, wait=False)
+            make_command_request(tmp_path, wait=False)
         )
 
     assert result == CommandResult(exit_code=None)
@@ -421,7 +396,7 @@ def test_provider_starts_command_with_hidden_console_on_windows(
         ),
     ):
         result = SubprocessCommandProvider(Shell.SH).run(
-            _make_request(tmp_path, wait=False)
+            make_command_request(tmp_path, wait=False)
         )
 
     assert result == CommandResult(exit_code=None)
@@ -439,7 +414,9 @@ def test_provider_propagates_start_failure_of_background_command(
     popen.side_effect = FileNotFoundError("Test shell missing")
 
     with pytest.raises(FileNotFoundError, match="Test shell missing"):
-        SubprocessCommandProvider(Shell.SH).run(_make_request(tmp_path, wait=False))
+        SubprocessCommandProvider(Shell.SH).run(
+            make_command_request(tmp_path, wait=False)
+        )
 
 
 #################################
@@ -450,7 +427,7 @@ def test_provider_propagates_start_failure_of_background_command(
 @posix_only
 def test_provider_runs_real_command_with_sh(tmp_path: Path) -> None:
     result = SubprocessCommandProvider(Shell.SH).run(
-        _make_request(tmp_path, "echo hello; echo problem >&2; exit 3")
+        make_command_request(tmp_path, "echo hello; echo problem >&2; exit 3")
     )
 
     assert result == CommandResult(exit_code=3, stdout="hello\n", stderr="problem\n")
@@ -459,7 +436,7 @@ def test_provider_runs_real_command_with_sh(tmp_path: Path) -> None:
 @posix_only
 def test_provider_passes_environment_to_real_command(tmp_path: Path) -> None:
     result = SubprocessCommandProvider(Shell.SH).run(
-        _make_request(
+        make_command_request(
             tmp_path,
             'echo "$TEST_VARIABLE"',
             environment={"TEST_VARIABLE": "value"},
@@ -471,7 +448,9 @@ def test_provider_passes_environment_to_real_command(tmp_path: Path) -> None:
 
 @posix_only
 def test_provider_runs_real_command_in_working_directory(tmp_path: Path) -> None:
-    result = SubprocessCommandProvider(Shell.SH).run(_make_request(tmp_path, "pwd"))
+    result = SubprocessCommandProvider(Shell.SH).run(
+        make_command_request(tmp_path, "pwd")
+    )
 
     assert Path(result.stdout.strip()).resolve() == tmp_path.resolve()
 
@@ -480,7 +459,7 @@ def test_provider_runs_real_command_in_working_directory(tmp_path: Path) -> None
 @posix_only
 def test_provider_stops_real_command_at_first_failing_line(tmp_path: Path) -> None:
     result = SubprocessCommandProvider(Shell.SH).run(
-        _make_request(tmp_path, "false\necho not reached")
+        make_command_request(tmp_path, "false\necho not reached")
     )
 
     assert result.exit_code == 1
@@ -491,14 +470,14 @@ def test_provider_stops_real_command_at_first_failing_line(tmp_path: Path) -> No
 def test_provider_terminates_real_command_after_timeout(tmp_path: Path) -> None:
     with pytest.raises(TimeoutError, match="did not finish within 0.5 seconds"):
         SubprocessCommandProvider(Shell.SH).run(
-            _make_request(tmp_path, "sleep 30", timeout=0.5)
+            make_command_request(tmp_path, "sleep 30", timeout=0.5)
         )
 
 
 @windows_only
 def test_provider_runs_real_command_with_cmd(tmp_path: Path) -> None:
     result = SubprocessCommandProvider(Shell.CMD).run(
-        _make_request(tmp_path, "echo hello & exit /b 3")
+        make_command_request(tmp_path, "echo hello & exit /b 3")
     )
 
     assert result.exit_code == 3
@@ -508,7 +487,7 @@ def test_provider_runs_real_command_with_cmd(tmp_path: Path) -> None:
 @windows_only
 def test_provider_runs_real_command_with_powershell(tmp_path: Path) -> None:
     result = SubprocessCommandProvider(Shell.POWERSHELL).run(
-        _make_request(tmp_path, "Write-Output hello; exit 3")
+        make_command_request(tmp_path, "Write-Output hello; exit 3")
     )
 
     assert result.exit_code == 3
@@ -519,7 +498,7 @@ def test_provider_runs_real_command_with_powershell(tmp_path: Path) -> None:
 @windows_only
 def test_provider_stops_real_powershell_command_at_first_error(tmp_path: Path) -> None:
     result = SubprocessCommandProvider(Shell.POWERSHELL).run(
-        _make_request(tmp_path, "Write-Error problem\nWrite-Output not-reached")
+        make_command_request(tmp_path, "Write-Error problem\nWrite-Output not-reached")
     )
 
     assert result.exit_code != 0

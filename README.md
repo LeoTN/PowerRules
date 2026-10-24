@@ -19,11 +19,11 @@
 
 ## About
 
-Define rules which run commands on your computer when configurable conditions match, for example when a process is gone, a window is open or it is a certain time of day.
+PowerRules is a rule-based command automation tool: when the conditions of a rule match, its commands run.
 
-PowerRules started as a tool to shut down, reboot or suspend a computer at the right moment. Since actions are plain shell commands, it can now run any program or script.
+Originally built to shut down a computer at the right moment, it now runs any shell command.
 
-Rules are evaluated from top to bottom. The first matching rule runs its actions in order.
+Rules are evaluated from top to bottom and the first match runs its actions in order. Policies have to be [trusted](#trust) first, so modifications of a policy or its scripts do not go unnoticed.
 
 ## Getting Started
 
@@ -57,10 +57,11 @@ rules:
         run: "shutdown /s /t 0"
 ```
 
-3\. Validate and evaluate the policy once. Use `--dry-run` to see what would happen:
+3\. Validate the policy, [trust](#trust) it after reviewing it and evaluate it once. Use `--dry-run` to see what would happen:
 
 ```bash
 pwru policy validate --policy my-policy.yaml
+pwru trust add --policy my-policy.yaml
 pwru policy run --once --policy my-policy.yaml --dry-run
 ```
 
@@ -248,11 +249,15 @@ actions:
     timeout: 600
     success_exit_codes: [0, 3]
     continue_on_error: true
+    trusted_files:
+      - scripts/backup.sh # Relative to the policy file (not to working_directory)
 
   # Start a command in the background without waiting for it
   - run: "notify.sh"
     shell: bash
     wait: false
+    trusted_files:
+      - scripts/notify.sh
 
   # Shutting down may require additional permissions on Linux
   - name: "Shutdown"
@@ -273,6 +278,7 @@ actions:
 | `success_exit_codes` | `[0]` | Exit codes which count as success. |
 | `wait` | `true` | `false` starts the command in the background. Cannot be combined with `timeout` or `success_exit_codes`. |
 | `continue_on_error` | `false` | Whether the remaining actions still run if this action fails. |
+| `trusted_files` | none | Files (e.g. scripts) the command depends on. They are verified before every run, see [Trust](#trust). Relative paths are resolved against the directory of the policy file. |
 
 </details>
 
@@ -281,7 +287,7 @@ Commands can read the name of their rule and action from the environment variabl
 If an action fails (unexpected exit code, timeout or the command cannot be started), the remaining actions are skipped unless `continue_on_error` is set.
 
 > [!WARNING]
-> Commands run with the privileges of the user who started PowerRules, so treat policy files like scripts.
+> Commands run with the privileges of the user who started PowerRules, so treat policy files like scripts. Use [Trust](#trust) to detect modifications.
 
 ### Policy Evaluation
 
@@ -298,23 +304,84 @@ pwru policy run --once
 pwru policy run --dry-run
 ```
 
-The policy is loaded once at startup, so changes to the file require a restart. If a condition cannot be evaluated or an action fails, the evaluation stops.
+The policy is loaded once at startup, so changes to the file require a restart. Unless `--dry-run` or `--no-require-trust` is used, the policy has to be [trusted](#trust). If a condition cannot be evaluated, an action fails or a trusted file was modified, the evaluation stops.
 
 <details>
   <summary><b>Options reference</b></summary><br>
 
 | Option | Applies to | Default | Description |
 |--------|------------|---------|-------------|
-| `--policy`, `-p` | all `policy` commands | `powerrules.yaml` | Path to the PowerRules policy file. |
+| `--policy`, `-p` | all `policy` commands, `trust add`, `trust remove` | `powerrules.yaml` | Path to the PowerRules policy file. |
 | `--once` | `policy run` | off | Evaluate the policy once and then exit. |
 | `--stop-on-match` | `policy run` | off | Keep evaluating until the first rule matches, then stop. |
 | `--dry-run` | `policy run` | off | Evaluate the policy without executing any matching action. |
+| `--no-require-trust` | `policy run` | off | Run the policy even if it is not trusted or was modified since it was trusted, see [Trust](#trust). |
 
 </details>
 
+### Trust
+
+PowerRules remembers which policies you trust. A policy is identified by its path and trusted by its content (SHA-256 hash). Every modification makes it untrusted until you review it and trust it again. Files which actions depend on (e.g. scripts or executables) are not detected automatically. To cover them as well, you can list them in the action's `trusted_files` configuration.
+
+```bash
+# Trust the current content of a policy and its trusted files
+pwru trust add --policy my-policy.yaml
+
+# Show all trusted policies and their current status
+pwru trust list
+
+# Remove the trust of a policy
+pwru trust remove --policy my-policy.yaml
+
+# Remove trusted policies whose policy file no longer exists
+pwru trust prune
+```
+
+Relative paths are resolved against the directory of the policy file:
+
+```yaml
+actions:
+  - run: "./backup.sh"
+    working_directory: scripts
+    trusted_files:
+      - scripts/backup.sh # Relative to the policy file (not to working_directory)
+```
+
+`pwru policy run` refuses to run untrusted policies by default. `--no-require-trust` can be used to override this behaviour.
+
+The policy and its trusted files are checked when the policy is loaded. Right before an action runs, its `trusted_files` are checked again. The trust store is saved in `~/.powerrules/trust.json`.
+
+<details>
+  <summary><b>Options reference</b></summary><br>
+
+| Command | Options | Description |
+|---------|---------|-------------|
+| `trust add` | `--policy` | Trust the current content of the policy and its trusted files. An invalid policy or an unreadable file cannot be trusted. |
+| `trust remove` | `--policy` | Remove the trust of the policy. |
+| `trust list` | `--trusted`, `--modified`, `--missing` | List all trusted policies and their current status. Several filters can be combined, a policy is shown if it matches at least one of them. |
+| `trust prune` | `--dry-run`, `--yes`, `-y` | Remove trusted policies whose policy file no longer exists. `--dry-run` only shows what would be removed, `--yes` skips the confirmation. |
+
+<br>
+
+Trust status of the policy and its files:
+
+| Status | Description |
+|--------|-------------|
+| `trusted` | The content is unchanged since it was trusted. |
+| `unknown` | The policy or file was never trusted. |
+| `modified` | The content changed since it was trusted. |
+| `missing` | The file cannot be read. |
+
+A policy only counts as trusted if the policy and all of its trusted files are trusted.
+
+</details>
+
+> [!WARNING]
+> Trust only covers the policy and its `trusted_files`. Programs started by commands are not checked and the trust store is only protected by the permissions of your user account.
+
 ### Logging
 
-All `policy` commands accept the following logging options:
+All `policy` and `trust` commands accept the following logging options:
 
 ```bash
 pwru policy run --log-level DEBUG --log-file my-log.log
@@ -330,6 +397,22 @@ Messages are shown on the console and written to a rotating log file. Commands o
 | `--log-level` | `INFO` | Minimum log level shown on the console and written to the log file. One of `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
 | `--log-file` | `powerrules.log` | Path to the rotating log file. |
 | `--log-level-file` | value of `--log-level` | Minimum log level written to the log file. |
+
+</details>
+
+### Exit Codes
+
+`pwru` reports the result of a command via its exit code.
+
+<details>
+  <summary><b>Exit code reference</b></summary><br>
+
+| Exit code | Meaning | Examples |
+|-----------|---------|----------|
+| `0` | Success. | The policy is valid, was evaluated or no rule matched. |
+| `1` | Runtime error. | A condition cannot be evaluated, an action fails, the trust store cannot be read or written, an unexpected error occurred or a confirmation was declined (`trust prune`). |
+| `2` | Policy error or invalid usage. | The policy file was not found, contains invalid YAML or fails validation. Invalid command line options also use this code. |
+| `3` | Trust error. | The policy or one of its `trusted_files` is not trusted, was modified or cannot be read, see [Trust](#trust). |
 
 </details>
 

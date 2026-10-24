@@ -1,10 +1,16 @@
-"""Run smoke tests against a built PowerRules executable (called by build_executable.py, not pytest).
+"""Run smoke tests against a built PowerRules executable (called by build_executable.py or manually, not pytest).
 
 Every scenario only validates policies or uses "--dry-run", except the scenarios which are marked with
 "executes_commands". Those only run harmless commands (echo, an exit code and a sleep).
+
+Usage:
+    poetry run python devscripts/tests/smoke_test_executable.py <path to the executable>
 """
 
+import argparse
+import os
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +25,9 @@ EXIT_RUNTIME_ERROR = 1
 
 # Mirrors EXIT_POLICY_ERROR of powerrules.cli.errors, the executable is intentionally tested as a black box
 EXIT_POLICY_ERROR = 2
+
+# Mirrors EXIT_POLICY_TRUST_ERROR of powerrules.cli.errors
+EXIT_POLICY_TRUST_ERROR = 3
 
 # A healthy executable never prints these. They indicate a missing module or an unclassified error
 FORBIDDEN_OUTPUT = (
@@ -232,7 +241,15 @@ SCENARIOS = (
     ),
     SmokeScenario(
         name="run once with real command",
-        arguments=("policy", "run", "--once", "--policy", POLICY_PLACEHOLDER),
+        arguments=(
+            "policy",
+            "run",
+            "--once",
+            # Untrusted policies are rejected by default
+            "--no-require-trust",
+            "--policy",
+            POLICY_PLACEHOLDER,
+        ),
         policy=REAL_COMMAND_POLICY,
         executes_commands=True,
         # This message is only logged after the command was started and finished
@@ -240,7 +257,15 @@ SCENARIOS = (
     ),
     SmokeScenario(
         name="run once with failing command",
-        arguments=("policy", "run", "--once", "--policy", POLICY_PLACEHOLDER),
+        arguments=(
+            "policy",
+            "run",
+            "--once",
+            # Untrusted policies are rejected by default
+            "--no-require-trust",
+            "--policy",
+            POLICY_PLACEHOLDER,
+        ),
         policy=FAILING_COMMAND_POLICY,
         executes_commands=True,
         expected_exit_codes=frozenset({EXIT_RUNTIME_ERROR}),
@@ -248,7 +273,15 @@ SCENARIOS = (
     ),
     SmokeScenario(
         name="run once with command timeout",
-        arguments=("policy", "run", "--once", "--policy", POLICY_PLACEHOLDER),
+        arguments=(
+            "policy",
+            "run",
+            "--once",
+            # Untrusted policies are rejected by default
+            "--no-require-trust",
+            "--policy",
+            POLICY_PLACEHOLDER,
+        ),
         policy=TIMEOUT_COMMAND_POLICY,
         executes_commands=True,
         expected_exit_codes=frozenset({EXIT_RUNTIME_ERROR}),
@@ -280,6 +313,41 @@ SCENARIOS = (
         policy=FORMER_ACTION_POLICY,
         expected_exit_codes=frozenset({EXIT_POLICY_ERROR}),
         expected_output=("Policy validation failed",),
+    ),
+    # The following scenarios depend on each other: rejected, trusted, run, listed, untrusted
+    SmokeScenario(
+        name="run once with untrusted policy",
+        arguments=("policy", "run", "--once", "--policy", POLICY_PLACEHOLDER),
+        policy=REAL_COMMAND_POLICY,
+        # Nothing is run because the policy is rejected, the flag only satisfies the safety net
+        executes_commands=True,
+        expected_exit_codes=frozenset({EXIT_POLICY_TRUST_ERROR}),
+        expected_output=("trust add --policy",),
+    ),
+    SmokeScenario(
+        name="trust add",
+        arguments=("trust", "add", "--policy", POLICY_PLACEHOLDER),
+        policy=REAL_COMMAND_POLICY,
+        expected_output=("is now trusted",),
+    ),
+    SmokeScenario(
+        name="run once with trusted policy",
+        arguments=("policy", "run", "--once", "--policy", POLICY_PLACEHOLDER),
+        policy=REAL_COMMAND_POLICY,
+        executes_commands=True,
+        expected_output=("Action 'Echo' finished with exit code 0",),
+    ),
+    SmokeScenario(
+        name="trust list",
+        arguments=("trust", "list"),
+        policy=REAL_COMMAND_POLICY,
+        expected_output=("Trusted at",),
+    ),
+    SmokeScenario(
+        name="trust remove",
+        arguments=("trust", "remove", "--policy", POLICY_PLACEHOLDER),
+        policy=REAL_COMMAND_POLICY,
+        expected_output=("is no longer trusted",),
     ),
 )
 
@@ -348,10 +416,18 @@ def _run_scenario(
         *log_arguments,
     ]
 
+    # The trust store lives in the home directory, which must never be the one of the machine which builds the executable
+    environment = {
+        **os.environ,
+        "HOME": str(working_directory),
+        "USERPROFILE": str(working_directory),
+    }
+
     try:
         result = subprocess.run(
             command,
             cwd=working_directory,
+            env=environment,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -374,8 +450,41 @@ def _run_scenario(
         if forbidden in output:
             return f"output contains '{forbidden}'\n{output}"
 
+    # Rich wraps long log lines at the console width, so line breaks and indentation can appear between any two words
+    normalized_output = " ".join(output.split())
+
     for expected in scenario.expected_output:
-        if expected not in output:
+        if " ".join(expected.split()) not in normalized_output:
             return f"output does not contain '{expected}'\n{output}"
 
     return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the smoke tests against an existing executable and return the process exit code."""
+    parser = argparse.ArgumentParser(
+        description="Run the smoke tests against a built PowerRules executable"
+    )
+    parser.add_argument("executable", type=Path, help="Path to the built executable")
+    arguments = parser.parse_args(argv)
+
+    if not arguments.executable.is_file():
+        print(f"[ERROR] Executable not found: {arguments.executable}")
+
+        return 1
+
+    failures = run_smoke_tests(arguments.executable)
+
+    for failure in failures:
+        print(f"[ERROR] Smoke test failed: {failure}")
+
+    if failures:
+        return 1
+
+    print("[INFO] All smoke tests passed")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

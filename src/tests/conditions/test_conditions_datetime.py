@@ -9,103 +9,42 @@ from powerrules.conditions.datetime import (
     TimeRange,
     Weekday,
 )
-from tests.mocks import make_clock_provider
+from tests.factories import make_clock_provider
 
 #################
 # TimeRange tests
 #################
 
 
-def test_time_range_matches_time_inside_normal_range() -> None:
-    time_range = TimeRange(
-        start=time(10, 0),
-        end=time(18, 0),
-    )
+@pytest.mark.parametrize(
+    ("start", "end", "current_time", "expected"),
+    [
+        # Normal range
+        (time(10, 0), time(18, 0), time(12, 0), True),
+        (time(10, 0), time(18, 0), time(9, 59), False),
+        (time(10, 0), time(18, 0), time(18, 1), False),
+        # Start is inclusive and end is exclusive
+        (time(10, 0), time(18, 0), time(10, 0), True),
+        (time(10, 0), time(18, 0), time(18, 0), False),
+        # Range crossing midnight
+        (time(22, 0), time(6, 0), time(23, 0), True),
+        (time(22, 0), time(6, 0), time(2, 0), True),
+        (time(22, 0), time(6, 0), time(12, 0), False),
+        (time(22, 0), time(6, 0), time(6, 0), False),
+        # Equal start and end means that the range contains no time
+        (time(10, 0), time(10, 0), time(10, 0), False),
+        (time(10, 0), time(10, 0), time(12, 0), False),
+    ],
+)
+def test_time_range_contains_expected_times(
+    start: time,
+    end: time,
+    current_time: time,
+    expected: bool,
+) -> None:
+    time_range = TimeRange(start=start, end=end)
 
-    assert time_range.contains(time(12, 0)) is True
-
-
-def test_time_range_does_not_match_time_before_normal_range() -> None:
-    time_range = TimeRange(
-        start=time(10, 0),
-        end=time(18, 0),
-    )
-
-    assert time_range.contains(time(9, 59)) is False
-
-
-def test_time_range_does_not_match_time_after_normal_range() -> None:
-    time_range = TimeRange(
-        start=time(10, 0),
-        end=time(18, 0),
-    )
-
-    assert time_range.contains(time(18, 1)) is False
-
-
-def test_time_range_includes_start_time() -> None:
-    time_range = TimeRange(
-        start=time(10, 0),
-        end=time(18, 0),
-    )
-
-    assert time_range.contains(time(10, 0)) is True
-
-
-def test_time_range_excludes_end_time() -> None:
-    time_range = TimeRange(
-        start=time(10, 0),
-        end=time(18, 0),
-    )
-
-    assert time_range.contains(time(18, 0)) is False
-
-
-def test_time_range_matches_time_before_midnight_when_crossing_midnight() -> None:
-    time_range = TimeRange(
-        start=time(22, 0),
-        end=time(6, 0),
-    )
-
-    assert time_range.contains(time(23, 0)) is True
-
-
-def test_time_range_matches_time_after_midnight_when_crossing_midnight() -> None:
-    time_range = TimeRange(
-        start=time(22, 0),
-        end=time(6, 0),
-    )
-
-    assert time_range.contains(time(2, 0)) is True
-
-
-def test_time_range_does_not_match_time_outside_midnight_range() -> None:
-    time_range = TimeRange(
-        start=time(22, 0),
-        end=time(6, 0),
-    )
-
-    assert time_range.contains(time(12, 0)) is False
-
-
-def test_time_range_excludes_end_time_when_crossing_midnight() -> None:
-    time_range = TimeRange(
-        start=time(22, 0),
-        end=time(6, 0),
-    )
-
-    assert time_range.contains(time(6, 0)) is False
-
-
-# Special case: start and end are equal, which means no time is in the range
-def test_time_range_with_equal_start_and_end_matches_no_time() -> None:
-    time_range = TimeRange(
-        start=time(10, 0),
-        end=time(10, 0),
-    )
-
-    assert time_range.contains(time(10, 0)) is False
-    assert time_range.contains(time(12, 0)) is False
+    assert time_range.contains(current_time) is expected
 
 
 #####################
@@ -165,14 +104,13 @@ def test_datetime_range_from_midnight_to_midnight_covers_exactly_one_day(
     assert datetime_range.contains(current_datetime) is expected
 
 
-#############################################
+##############################################
 # DateTimeCondition tests (absolute datetimes)
-#############################################
+##############################################
 
 
 def test_datetime_condition_matches_current_datetime_in_datetime_range() -> None:
     condition = DateTimeCondition(
-        # clock_provider=make_clock_provider(datetime(2026, 8, 21, 23, 30)),
         clock_provider=make_clock_provider(datetime(2026, 8, 21, 23, 30)),
         datetime_range=DateTimeRange(
             start=datetime(2026, 8, 21, 18, 0),
@@ -413,13 +351,6 @@ def test_datetime_condition_uses_start_weekday_for_range_crossing_midnight() -> 
     # Friday 01:00 belongs to the range which started on Thursday
     clock_provider.now.return_value = datetime(2026, 8, 21, 1, 0)
     assert condition.evaluate() is False
-
-
-def test_datetime_condition_raises_error_when_no_criteria_specified() -> None:
-    clock_provider = make_clock_provider(datetime(2026, 8, 21, 12, 0))
-
-    with pytest.raises(ValueError):
-        DateTimeCondition(clock_provider=clock_provider)
 
 
 @pytest.mark.parametrize(

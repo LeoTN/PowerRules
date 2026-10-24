@@ -51,6 +51,25 @@ def x11_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DISPLAY", ":0")
 
 
+def make_title_connection(properties: dict[int, bytes | None]) -> Mock:
+    """Create a mocked X connection which returns the given raw value for each property atom.
+
+    Args:
+        properties: Raw property values keyed by the atom of the property.
+
+    Returns:
+        A mock which knows the atoms "_NET_WM_NAME" (100) and "UTF8_STRING" (101).
+    """
+    atoms = {"_NET_WM_NAME": 100, "UTF8_STRING": 101}
+    connection = Mock()
+    connection.intern_atom.side_effect = lambda name: atoms[name]
+    connection.get_property.side_effect = lambda _window_id, property_atom, _type_atom: (
+        properties.get(property_atom)
+    )
+
+    return connection
+
+
 #########################
 # _get_unavailable_reason
 #########################
@@ -209,38 +228,26 @@ def test_linux_window_provider_read_window_ids_without_property() -> None:
 #############
 
 
-def _build_title_connection(properties: dict[int, bytes | None]) -> Mock:
-    """Build a connection which returns the given raw value for each property atom."""
-    atoms = {"_NET_WM_NAME": 100, "UTF8_STRING": 101}
-    connection = Mock()
-    connection.intern_atom.side_effect = lambda name: atoms[name]
-    connection.get_property.side_effect = lambda _window_id, property_atom, _type_atom: (
-        properties.get(property_atom)
-    )
-
-    return connection
-
-
 def test_linux_window_provider_reads_utf8_title() -> None:
-    connection = _build_title_connection({100: "Täst Fenster".encode()})
+    connection = make_title_connection({100: "Täst Fenster".encode()})
 
     assert LinuxWindowProvider._read_title(connection, 1) == "Täst Fenster"
 
 
 def test_linux_window_provider_falls_back_to_legacy_latin1_title() -> None:
-    connection = _build_title_connection({_ATOM_WM_NAME: "Täst".encode("latin-1")})
+    connection = make_title_connection({_ATOM_WM_NAME: "Täst".encode("latin-1")})
 
     assert LinuxWindowProvider._read_title(connection, 1) == "Täst"
 
 
 def test_linux_window_provider_read_title_returns_none_without_title() -> None:
-    connection = _build_title_connection({})
+    connection = make_title_connection({})
 
     assert LinuxWindowProvider._read_title(connection, 1) is None
 
 
 def test_linux_window_provider_replaces_invalid_utf8_bytes_in_title() -> None:
-    connection = _build_title_connection({100: b"Test \xff title"})
+    connection = make_title_connection({100: b"Test \xff title"})
 
     assert LinuxWindowProvider._read_title(connection, 1) == "Test \ufffd title"
 

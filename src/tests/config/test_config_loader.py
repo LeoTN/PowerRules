@@ -8,30 +8,43 @@ from pydantic import ValidationError
 from powerrules.conditions.datetime import Month, Weekday
 from powerrules.config.loader import ConfigurationLoader
 from powerrules.config.models import DateRangeConfiguration, DateTimeRangeConfiguration
+from powerrules.engine.exceptions import PolicyNotTrustedError
 from powerrules.providers.command import Shell
+from tests.factories import (
+    make_policy_yaml,
+    make_trust_checker,
+)
+from tests.helpers import (
+    SCRIPT_DIRECTORY_NAME,
+    create_symlink,
+    write_policy,
+)
 
-
-def _write_policy(tmp_path: Path, content: str) -> Path:
-    """Write a policy file into the temporary directory."""
-    configuration_file = tmp_path / "powerrules.yaml"
-    configuration_file.write_text(content, encoding="utf-8")
-
-    return configuration_file
-
-
-def test_configuration_loader_loads_valid_configuration(tmp_path: Path) -> None:
-    configuration_file = _write_policy(
-        tmp_path,
-        """
+POLICY_WITH_DUPLICATE_FILES = """
 rules:
-  - name: "Shutdown after backup test rule"
+  - name: "Test rule"
     conditions:
       process:
         name: "backup.exe"
         exists: false
     actions:
-      - run: "shutdown /s /t 0"
-""",
+      - run: "first"
+        trusted_files:
+          - scripts/a.sh
+      - run: "second"
+        trusted_files:
+          - ./scripts/a.sh
+          - b.sh
+"""
+
+
+def test_configuration_loader_loads_valid_configuration(tmp_path: Path) -> None:
+    configuration_file = write_policy(
+        tmp_path,
+        make_policy_yaml(
+            rule_name="Shutdown after backup test rule",
+            command="shutdown /s /t 0",
+        ),
     )
 
     configuration = ConfigurationLoader().load(configuration_file)
@@ -45,7 +58,7 @@ rules:
 
 
 def test_configuration_loader_loads_nested_conditions(tmp_path: Path) -> None:
-    configuration_file = _write_policy(
+    configuration_file = write_policy(
         tmp_path,
         """
 rules:
@@ -82,7 +95,7 @@ rules:
 def test_configuration_loader_loads_multiple_actions_with_all_options(
     tmp_path: Path,
 ) -> None:
-    configuration_file = _write_policy(
+    configuration_file = write_policy(
         tmp_path,
         """
 rules:
@@ -117,7 +130,7 @@ rules:
     assert first_action.name == "Backup"
     assert first_action.run == "echo one\necho two\n"
     assert first_action.shell is Shell.BASH
-    assert first_action.working_directory == Path("scripts")
+    assert first_action.working_directory == Path(SCRIPT_DIRECTORY_NAME)
     # Unquoted YAML numbers and booleans are converted to strings
     assert first_action.env == {
         "RETRIES": "3",
@@ -136,7 +149,7 @@ rules:
 def test_configuration_loader_loads_null_timeout_as_no_time_limit(
     tmp_path: Path,
 ) -> None:
-    configuration_file = _write_policy(
+    configuration_file = write_policy(
         tmp_path,
         """
 rules:
@@ -157,7 +170,7 @@ rules:
 
 
 def test_configuration_loader_rejects_invalid_configuration(tmp_path: Path) -> None:
-    configuration_file = _write_policy(
+    configuration_file = write_policy(
         tmp_path,
         """
 rules:
@@ -176,7 +189,7 @@ rules:
 
 
 def test_configuration_loader_rejects_former_action_format(tmp_path: Path) -> None:
-    configuration_file = _write_policy(
+    configuration_file = write_policy(
         tmp_path,
         """
 rules:
@@ -195,7 +208,7 @@ rules:
 
 
 def test_configuration_loader_rejects_invalid_yaml(tmp_path: Path) -> None:
-    configuration_file = _write_policy(
+    configuration_file = write_policy(
         tmp_path,
         # The missing closing quote is intentional
         """
@@ -218,7 +231,7 @@ def test_configuration_loader_raises_for_missing_file(tmp_path: Path) -> None:
 
 
 def test_configuration_loader_loads_unquoted_absolute_dates(tmp_path: Path) -> None:
-    configuration_file = _write_policy(
+    configuration_file = write_policy(
         tmp_path,
         # PyYAML converts these unquoted values into date and datetime objects on its own
         """
@@ -263,7 +276,7 @@ rules:
 def test_configuration_loader_rejects_unquoted_timezone_aware_datetime(
     tmp_path: Path,
 ) -> None:
-    configuration_file = _write_policy(
+    configuration_file = write_policy(
         tmp_path,
         """
 rules:
@@ -288,7 +301,7 @@ rules:
 def test_configuration_loader_loads_weekday_and_month_regardless_of_case(
     tmp_path: Path,
 ) -> None:
-    configuration_file = _write_policy(
+    configuration_file = write_policy(
         tmp_path,
         """
 rules:
@@ -313,3 +326,85 @@ rules:
     assert condition is not None
     assert condition.weekday == [Weekday.SATURDAY, Weekday.SUNDAY]
     assert condition.month == [Month.DECEMBER, Month.JANUARY]
+
+
+#####################
+# Trusted files tests
+#####################
+
+
+def test_loader_verifies_policy_content_and_unique_resolved_files(
+    tmp_path: Path,
+) -> None:
+    policy = write_policy(tmp_path, POLICY_WITH_DUPLICATE_FILES)
+    checker = make_trust_checker()
+
+    ConfigurationLoader(trust_checker=checker).load(policy)
+
+    checker.verify.assert_called_once_with(
+        policy.resolve(),
+        policy.read_bytes(),
+        (
+            tmp_path.resolve() / SCRIPT_DIRECTORY_NAME / "a.sh",
+            tmp_path.resolve() / "b.sh",
+        ),
+    )
+
+
+def test_loader_resolves_trusted_files_against_directory_of_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = write_policy(tmp_path / "policies", POLICY_WITH_DUPLICATE_FILES)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    checker = make_trust_checker()
+
+    ConfigurationLoader(trust_checker=checker).load(policy)
+
+    files = checker.verify.call_args.args[2]
+
+    assert all(file.is_relative_to((tmp_path / "policies").resolve()) for file in files)
+
+
+def test_loader_resolves_symbolic_link_of_policy_before_verifying(
+    tmp_path: Path,
+) -> None:
+    policy = write_policy(tmp_path / "real", POLICY_WITH_DUPLICATE_FILES)
+    link = tmp_path / "link.yaml"
+
+    create_symlink(link, policy)
+    checker = make_trust_checker()
+
+    ConfigurationLoader(trust_checker=checker).load(link)
+
+    verify_arguments = checker.verify.call_args.args
+
+    assert verify_arguments[0] == policy.resolve()
+    # The files belong to the directory of the real policy
+    assert verify_arguments[2][0].parent.parent == (tmp_path / "real").resolve()
+
+
+def test_loader_does_not_verify_invalid_policy(tmp_path: Path) -> None:
+    policy = write_policy(tmp_path, 'rules:\n  - name: "Invalid"\n')
+    checker = make_trust_checker()
+
+    with pytest.raises(ValidationError):
+        ConfigurationLoader(trust_checker=checker).load(policy)
+
+    checker.verify.assert_not_called()
+
+
+def test_loader_propagates_trust_error(tmp_path: Path) -> None:
+    policy = write_policy(tmp_path, POLICY_WITH_DUPLICATE_FILES)
+    checker = make_trust_checker()
+    checker.verify.side_effect = PolicyNotTrustedError("Test policy is not trusted")
+
+    with pytest.raises(PolicyNotTrustedError, match="Test policy is not trusted"):
+        ConfigurationLoader(trust_checker=checker).load(policy)
+
+
+def test_loader_skips_trust_check_without_checker(tmp_path: Path) -> None:
+    policy = write_policy(tmp_path, POLICY_WITH_DUPLICATE_FILES)
+
+    assert len(ConfigurationLoader().load(policy).rules) == 1

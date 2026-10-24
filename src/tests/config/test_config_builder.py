@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from powerrules.actions.command import DEFAULT_ACTION_TIMEOUT_SECONDS, CommandAction
+from powerrules.actions.command import DEFAULT_ACTION_TIMEOUT_SECONDS
 from powerrules.conditions.datetime import (
     DateTimeCondition,
     DateTimeRange,
@@ -15,151 +15,40 @@ from powerrules.conditions.matcher import MatchType
 from powerrules.conditions.operators import AndCondition, NotCondition, OrCondition
 from powerrules.conditions.process import ProcessCondition
 from powerrules.conditions.window import WindowCondition
-from powerrules.config.builder import ConfigurationBuilder
 from powerrules.config.models import (
-    ActionConfiguration,
     ConditionConfiguration,
     DateRangeConfiguration,
-    DateTimeConditionConfiguration,
     DateTimeRangeConfiguration,
     MatchConfiguration,
-    ProcessConditionConfiguration,
     RuleConfiguration,
     RuleSetConfiguration,
     TimeRangeConfiguration,
-    WindowConditionConfiguration,
 )
 from powerrules.engine.exceptions import ConfigurationError
-from powerrules.engine.models import Rule, RuleSet
+from powerrules.engine.models import RuleSet
 from powerrules.providers.command import Shell
-from tests.mocks import (
+from tests.factories import (
+    build_command_action,
+    build_datetime_condition,
+    build_rule,
+    make_action_configuration,
     make_clock_provider,
     make_command_provider,
+    make_configuration_builder,
+    make_datetime_condition_configuration,
+    make_files_verifier,
+    make_process_condition_configuration,
     make_process_provider,
+    make_rule_configuration,
+    make_window_condition_configuration,
     make_window_provider,
 )
-
-BASE_DIRECTORY = Path("policies")
-DEFAULT_NOW = datetime(2026, 8, 22, 12, 0)
-
-BetweenConfiguration = (
-    TimeRangeConfiguration | DateRangeConfiguration | DateTimeRangeConfiguration
+from tests.helpers import (
+    BACKUP_SCRIPT_NAME,
+    DEFAULT_BASE_DIRECTORY,
+    DEFAULT_NOW_SATURDAY_NOON,
+    SCRIPT_DIRECTORY_NAME,
 )
-
-
-def _make_builder(
-    *,
-    clock_provider: object | None = None,
-    process_provider: object | None = None,
-    window_provider: object | None = None,
-    command_provider: object | None = None,
-    base_directory: Path = BASE_DIRECTORY,
-) -> ConfigurationBuilder:
-    """Create a builder. Providers which are not given are replaced by mocks."""
-    return ConfigurationBuilder(
-        clock_provider=(
-            clock_provider
-            if clock_provider is not None
-            else make_clock_provider(DEFAULT_NOW)
-        ),
-        process_provider=(
-            process_provider
-            if process_provider is not None
-            else make_process_provider()
-        ),
-        command_provider=(
-            command_provider
-            if command_provider is not None
-            else make_command_provider()
-        ),
-        window_provider=(
-            window_provider if window_provider is not None else make_window_provider()
-        ),
-        base_directory=base_directory,
-    )  # type: ignore[arg-type]
-
-
-def _make_process_condition(
-    name: str = "backup.exe",
-    exists: bool = False,
-    match: MatchConfiguration | None = None,
-) -> ConditionConfiguration:
-    """Create the configuration of a process condition."""
-    return ConditionConfiguration(
-        process=ProcessConditionConfiguration(
-            name=name,
-            exists=exists,
-            match=match if match is not None else MatchConfiguration(),
-        )
-    )
-
-
-def _make_datetime_condition(
-    between: BetweenConfiguration | None = None,
-    weekday: list[Weekday] | None = None,
-    month: list[Month] | None = None,
-) -> ConditionConfiguration:
-    """Create the configuration of a datetime condition."""
-    return ConditionConfiguration(
-        datetime=DateTimeConditionConfiguration(
-            between=between,
-            weekday=weekday,
-            month=month,
-        )
-    )
-
-
-def _make_rule_configuration(
-    name: str = "Test rule",
-    conditions: ConditionConfiguration | None = None,
-    actions: list[ActionConfiguration] | None = None,
-    enabled: bool = True,
-) -> RuleConfiguration:
-    """Create the configuration of a rule with a process condition and a command action by default."""
-    return RuleConfiguration(
-        name=name,
-        enabled=enabled,
-        conditions=(
-            conditions if conditions is not None else _make_process_condition()
-        ),
-        actions=(
-            actions if actions is not None else [ActionConfiguration(run="echo test")]
-        ),
-    )
-
-
-def _build_rule(
-    conditions: ConditionConfiguration | None = None,
-    *,
-    actions: list[ActionConfiguration] | None = None,
-    builder: ConfigurationBuilder | None = None,
-) -> Rule:
-    """Build a single rule from the given condition and actions."""
-    builder = builder if builder is not None else _make_builder()
-    configuration = RuleSetConfiguration(
-        rules=[_make_rule_configuration(conditions=conditions, actions=actions)]
-    )
-
-    return builder.build(configuration).rules[0]
-
-
-def _build_datetime_condition(
-    clock_provider: object,
-    *,
-    between: BetweenConfiguration | None = None,
-    weekday: list[Weekday] | None = None,
-    month: list[Month] | None = None,
-) -> DateTimeCondition:
-    """Build a datetime condition which uses the given clock provider."""
-    rule = _build_rule(
-        _make_datetime_condition(between, weekday, month),
-        builder=_make_builder(clock_provider=clock_provider),
-    )
-
-    assert isinstance(rule.condition, DateTimeCondition)
-
-    return rule.condition
-
 
 ################
 # Rule set tests
@@ -167,8 +56,8 @@ def _build_datetime_condition(
 
 
 def test_builder_builds_rule_set() -> None:
-    rule_set = _make_builder().build(
-        RuleSetConfiguration(rules=[_make_rule_configuration()])
+    rule_set = make_configuration_builder().build(
+        RuleSetConfiguration(rules=[make_rule_configuration()])
     )
 
     assert isinstance(rule_set, RuleSet)
@@ -176,13 +65,15 @@ def test_builder_builds_rule_set() -> None:
 
 
 def test_builder_builds_empty_rule_set() -> None:
-    assert _make_builder().build(RuleSetConfiguration(rules=[])).rules == ()
+    rule_set = make_configuration_builder().build(RuleSetConfiguration(rules=[]))
+
+    assert rule_set.rules == ()
 
 
 def test_builder_preserves_rule_properties() -> None:
-    rule_set = _make_builder().build(
+    rule_set = make_configuration_builder().build(
         RuleSetConfiguration(
-            rules=[_make_rule_configuration(name="Disabled rule", enabled=False)]
+            rules=[make_rule_configuration(name="Disabled rule", enabled=False)]
         )
     )
 
@@ -191,11 +82,11 @@ def test_builder_preserves_rule_properties() -> None:
 
 
 def test_builder_preserves_rule_order() -> None:
-    rule_set = _make_builder().build(
+    rule_set = make_configuration_builder().build(
         RuleSetConfiguration(
             rules=[
-                _make_rule_configuration(name="First test rule"),
-                _make_rule_configuration(name="Second test rule"),
+                make_rule_configuration(name="First test rule"),
+                make_rule_configuration(name="Second test rule"),
             ]
         )
     )
@@ -214,9 +105,9 @@ def test_builder_preserves_rule_order() -> None:
 def test_builder_builds_process_condition() -> None:
     process_provider = make_process_provider(["backup.exe"])
 
-    rule = _build_rule(
-        _make_process_condition(name="backup.exe", exists=True),
-        builder=_make_builder(process_provider=process_provider),
+    rule = build_rule(
+        make_process_condition_configuration(name="backup.exe", exists=True),
+        builder=make_configuration_builder(process_provider=process_provider),
     )
 
     assert isinstance(rule.condition, ProcessCondition)
@@ -229,13 +120,15 @@ def test_builder_builds_process_condition() -> None:
 
 
 def test_builder_passes_match_configuration_to_process_condition() -> None:
-    rule = _build_rule(
-        _make_process_condition(
+    rule = build_rule(
+        make_process_condition_configuration(
             name="BACKUP.*",
             exists=True,
             match=MatchConfiguration(type=MatchType.REGEX, case_sensitive=False),
         ),
-        builder=_make_builder(process_provider=make_process_provider(["backup.exe"])),
+        builder=make_configuration_builder(
+            process_provider=make_process_provider(["backup.exe"])
+        ),
     )
 
     assert isinstance(rule.condition, ProcessCondition)
@@ -252,11 +145,9 @@ def test_builder_passes_match_configuration_to_process_condition() -> None:
 def test_builder_builds_window_condition() -> None:
     window_provider = make_window_provider(["My window title"])
 
-    rule = _build_rule(
-        ConditionConfiguration(
-            window=WindowConditionConfiguration(title="My window title", exists=True)
-        ),
-        builder=_make_builder(window_provider=window_provider),
+    rule = build_rule(
+        make_window_condition_configuration("My window title"),
+        builder=make_configuration_builder(window_provider=window_provider),
     )
 
     assert isinstance(rule.condition, WindowCondition)
@@ -268,15 +159,12 @@ def test_builder_builds_window_condition() -> None:
 
 
 def test_builder_passes_match_configuration_to_window_condition() -> None:
-    rule = _build_rule(
-        ConditionConfiguration(
-            window=WindowConditionConfiguration(
-                title="my .* title",
-                exists=True,
-                match=MatchConfiguration(type=MatchType.REGEX, case_sensitive=False),
-            )
+    rule = build_rule(
+        make_window_condition_configuration(
+            "my .* title",
+            match=MatchConfiguration(type=MatchType.REGEX, case_sensitive=False),
         ),
-        builder=_make_builder(
+        builder=make_configuration_builder(
             window_provider=make_window_provider(["My Window Title"])
         ),
     )
@@ -293,9 +181,9 @@ def test_builder_passes_match_configuration_to_window_condition() -> None:
 
 
 def test_builder_builds_time_range_condition() -> None:
-    clock_provider = make_clock_provider(DEFAULT_NOW)
+    clock_provider = make_clock_provider(DEFAULT_NOW_SATURDAY_NOON)
 
-    condition = _build_datetime_condition(
+    condition = build_datetime_condition(
         clock_provider,
         between=TimeRangeConfiguration(start=time(22, 0), end=time(6, 0)),
     )
@@ -308,8 +196,8 @@ def test_builder_builds_time_range_condition() -> None:
 
 
 def test_builder_builds_weekday_condition() -> None:
-    condition = _build_datetime_condition(
-        make_clock_provider(DEFAULT_NOW),
+    condition = build_datetime_condition(
+        make_clock_provider(DEFAULT_NOW_SATURDAY_NOON),
         weekday=[Weekday.SATURDAY, Weekday.SUNDAY],
     )
 
@@ -320,8 +208,8 @@ def test_builder_builds_weekday_condition() -> None:
 
 
 def test_builder_builds_time_range_with_weekday_condition() -> None:
-    condition = _build_datetime_condition(
-        make_clock_provider(DEFAULT_NOW),
+    condition = build_datetime_condition(
+        make_clock_provider(DEFAULT_NOW_SATURDAY_NOON),
         between=TimeRangeConfiguration(start=time(23, 0), end=time(1, 30)),
         weekday=[Weekday.MONDAY],
     )
@@ -334,7 +222,7 @@ def test_builder_builds_time_range_with_weekday_condition() -> None:
 def test_builder_converts_date_range_to_datetime_range() -> None:
     clock_provider = make_clock_provider(datetime(2026, 8, 21, 12, 0))
 
-    condition = _build_datetime_condition(
+    condition = build_datetime_condition(
         clock_provider,
         between=DateRangeConfiguration(start=date(2026, 8, 21), end=date(2026, 8, 22)),
     )
@@ -354,7 +242,7 @@ def test_builder_converts_date_range_to_datetime_range() -> None:
 
 
 def test_builder_builds_datetime_range_condition() -> None:
-    condition = _build_datetime_condition(
+    condition = build_datetime_condition(
         make_clock_provider(datetime(2026, 8, 21, 23, 0)),
         between=DateTimeRangeConfiguration(
             start=datetime(2026, 8, 21, 18, 0),
@@ -372,7 +260,7 @@ def test_builder_builds_datetime_range_condition() -> None:
 
 
 def test_builder_builds_date_range_with_weekday_condition() -> None:
-    condition = _build_datetime_condition(
+    condition = build_datetime_condition(
         make_clock_provider(datetime(2026, 8, 21, 12, 0)),
         between=DateRangeConfiguration(start=date(2026, 8, 21), end=date(2026, 8, 22)),
         weekday=[Weekday.FRIDAY],
@@ -390,7 +278,7 @@ def test_builder_builds_date_range_with_weekday_condition() -> None:
 def test_builder_builds_month_condition() -> None:
     clock_provider = make_clock_provider(datetime(2026, 8, 21, 12, 0))
 
-    condition = _build_datetime_condition(
+    condition = build_datetime_condition(
         clock_provider,
         month=[Month.AUGUST, Month.SEPTEMBER],
     )
@@ -407,7 +295,7 @@ def test_builder_builds_month_condition() -> None:
 
 
 def test_builder_builds_month_with_other_criteria() -> None:
-    condition = _build_datetime_condition(
+    condition = build_datetime_condition(
         make_clock_provider(datetime(2026, 8, 21, 23, 0)),
         between=TimeRangeConfiguration(start=time(22, 0), end=time(6, 0)),
         weekday=[Weekday.FRIDAY],
@@ -427,18 +315,20 @@ def test_builder_builds_month_with_other_criteria() -> None:
 
 
 def test_builder_builds_nested_conditions() -> None:
-    rule = _build_rule(
+    rule = build_rule(
         ConditionConfiguration(
             and_conditions=[
-                _make_process_condition(name="backup.exe", exists=False),
+                make_process_condition_configuration(name="backup.exe", exists=False),
                 ConditionConfiguration(
                     or_conditions=[
-                        _make_datetime_condition(
+                        make_datetime_condition_configuration(
                             between=TimeRangeConfiguration(
                                 start=time(23, 0), end=time(0, 0)
                             )
                         ),
-                        _make_process_condition(name="maintenance.exe", exists=True),
+                        make_process_condition_configuration(
+                            name="maintenance.exe", exists=True
+                        ),
                     ]
                 ),
             ]
@@ -453,7 +343,9 @@ def test_builder_builds_nested_conditions() -> None:
 
 
 def test_builder_builds_not_condition() -> None:
-    rule = _build_rule(ConditionConfiguration(not_condition=_make_process_condition()))
+    rule = build_rule(
+        ConditionConfiguration(not_condition=make_process_condition_configuration())
+    )
 
     assert isinstance(rule.condition, NotCondition)
     assert isinstance(rule.condition.condition, ProcessCondition)
@@ -468,13 +360,13 @@ def test_builder_raises_for_configuration_without_condition() -> None:
                 name="Test rule",
                 enabled=True,
                 conditions=ConditionConfiguration.model_construct(),
-                actions=[ActionConfiguration(run="echo test")],
+                actions=[make_action_configuration()],
             )
         ]
     )
 
     with pytest.raises(ConfigurationError, match="does not contain a condition"):
-        _make_builder().build(configuration)
+        make_configuration_builder().build(configuration)
 
 
 ##############
@@ -485,19 +377,13 @@ def test_builder_raises_for_configuration_without_condition() -> None:
 def test_builder_builds_command_action_with_defaults() -> None:
     command_provider = make_command_provider()
 
-    rule = _build_rule(
-        actions=[ActionConfiguration(run="echo test")],
-        builder=_make_builder(command_provider=command_provider),
+    action = build_command_action(
+        builder=make_configuration_builder(command_provider=command_provider)
     )
 
-    assert len(rule.actions) == 1
-
-    action = rule.actions[0]
-
-    assert isinstance(action, CommandAction)
     assert action.command_provider is command_provider
     assert action.command == "echo test"
-    assert action.working_directory == BASE_DIRECTORY
+    assert action.working_directory == DEFAULT_BASE_DIRECTORY
     assert action.name == "Action 1 of 1"
     assert action.rule_name == "Test rule"
     assert action.shell is None
@@ -509,28 +395,23 @@ def test_builder_builds_command_action_with_defaults() -> None:
 
 
 def test_builder_passes_configured_action_options() -> None:
-    rule = _build_rule(
-        actions=[
-            ActionConfiguration(
-                run="backup.sh",
-                name="Backup",
-                shell=Shell.BASH,
-                working_directory=Path("scripts"),
-                env={"KEY": "value"},
-                timeout=5.5,
-                success_exit_codes=[0, 2],
-                continue_on_error=True,
-            )
-        ]
+    action = build_command_action(
+        make_action_configuration(
+            run=BACKUP_SCRIPT_NAME,
+            name="Backup",
+            shell=Shell.BASH,
+            working_directory=Path(SCRIPT_DIRECTORY_NAME),
+            env={"KEY": "value"},
+            timeout=5.5,
+            success_exit_codes=[0, 2],
+            continue_on_error=True,
+        )
     )
 
-    action = rule.actions[0]
-
-    assert isinstance(action, CommandAction)
-    assert action.command == "backup.sh"
+    assert action.command == BACKUP_SCRIPT_NAME
     assert action.name == "Backup"
     assert action.shell is Shell.BASH
-    assert action.working_directory == BASE_DIRECTORY / "scripts"
+    assert action.working_directory == DEFAULT_BASE_DIRECTORY / SCRIPT_DIRECTORY_NAME
     assert action.environment == {"KEY": "value"}
     assert action.timeout == 5.5
     assert action.success_exit_codes == frozenset({0, 2})
@@ -538,72 +419,59 @@ def test_builder_passes_configured_action_options() -> None:
 
 
 def test_builder_builds_background_action() -> None:
-    rule = _build_rule(actions=[ActionConfiguration(run="echo test", wait=False)])
+    action = build_command_action(make_action_configuration(wait=False))
 
-    action = rule.actions[0]
-
-    assert isinstance(action, CommandAction)
     assert action.wait is False
 
 
 def test_builder_builds_action_without_time_limit() -> None:
-    rule = _build_rule(actions=[ActionConfiguration(run="echo test", timeout=None)])
+    action = build_command_action(make_action_configuration(timeout=None))
 
-    action = rule.actions[0]
-
-    assert isinstance(action, CommandAction)
     assert action.timeout is None
 
 
 @pytest.mark.parametrize(
     ("working_directory", "expected"),
     [
-        (Path("scripts"), BASE_DIRECTORY / "scripts"),
-        (Path("scripts/nightly"), BASE_DIRECTORY / "scripts" / "nightly"),
-        (Path("../shared"), BASE_DIRECTORY / ".." / "shared"),
+        (Path(SCRIPT_DIRECTORY_NAME), DEFAULT_BASE_DIRECTORY / SCRIPT_DIRECTORY_NAME),
+        (
+            Path("scripts/nightly"),
+            DEFAULT_BASE_DIRECTORY / SCRIPT_DIRECTORY_NAME / "nightly",
+        ),
+        (Path("../shared"), DEFAULT_BASE_DIRECTORY / ".." / "shared"),
     ],
 )
 def test_builder_resolves_relative_working_directory_against_base_directory(
     working_directory: Path,
     expected: Path,
 ) -> None:
-    rule = _build_rule(
-        actions=[
-            ActionConfiguration(run="echo test", working_directory=working_directory)
-        ]
+    action = build_command_action(
+        make_action_configuration(working_directory=working_directory)
     )
 
-    action = rule.actions[0]
-
-    assert isinstance(action, CommandAction)
     assert action.working_directory == expected
 
 
 def test_builder_keeps_absolute_working_directory(tmp_path: Path) -> None:
     absolute_directory = tmp_path / "other"
 
-    rule = _build_rule(
-        actions=[
-            ActionConfiguration(run="echo test", working_directory=absolute_directory)
-        ]
+    action = build_command_action(
+        make_action_configuration(working_directory=absolute_directory)
     )
 
-    action = rule.actions[0]
-
-    assert isinstance(action, CommandAction)
     assert action.working_directory == absolute_directory
 
 
 def test_builder_keeps_action_order_and_shares_command_provider() -> None:
     command_provider = make_command_provider()
 
-    rule = _build_rule(
+    rule = build_rule(
         actions=[
-            ActionConfiguration(run="first"),
-            ActionConfiguration(run="second"),
-            ActionConfiguration(run="third"),
+            make_action_configuration(run="first"),
+            make_action_configuration(run="second"),
+            make_action_configuration(run="third"),
         ],
-        builder=_make_builder(command_provider=command_provider),
+        builder=make_configuration_builder(command_provider=command_provider),
     )
 
     assert [action.command for action in rule.actions] == ["first", "second", "third"]  # type: ignore[attr-defined]
@@ -611,11 +479,11 @@ def test_builder_keeps_action_order_and_shares_command_provider() -> None:
 
 
 def test_builder_names_unnamed_actions_by_position() -> None:
-    rule = _build_rule(
+    rule = build_rule(
         actions=[
-            ActionConfiguration(run="first"),
-            ActionConfiguration(run="second", name="Custom"),
-            ActionConfiguration(run="third"),
+            make_action_configuration(run="first"),
+            make_action_configuration(run="second", name="Custom"),
+            make_action_configuration(run="third"),
         ]
     )
 
@@ -627,18 +495,15 @@ def test_builder_names_unnamed_actions_by_position() -> None:
 
 
 def test_builder_numbers_actions_per_rule() -> None:
-    rule_set = _make_builder().build(
+    rule_set = make_configuration_builder().build(
         RuleSetConfiguration(
             rules=[
-                _make_rule_configuration(
-                    name="First rule",
-                    actions=[ActionConfiguration(run="echo test")],
-                ),
-                _make_rule_configuration(
+                make_rule_configuration(name="First rule"),
+                make_rule_configuration(
                     name="Second rule",
                     actions=[
-                        ActionConfiguration(run="first"),
-                        ActionConfiguration(run="second"),
+                        make_action_configuration(run="first"),
+                        make_action_configuration(run="second"),
                     ],
                 ),
             ]
@@ -661,17 +526,53 @@ def test_builder_numbers_actions_per_rule() -> None:
 def test_builder_builds_executable_action() -> None:
     command_provider = make_command_provider()
 
-    rule = _build_rule(
-        actions=[ActionConfiguration(run="echo test", env={"KEY": "value"})],
-        builder=_make_builder(command_provider=command_provider),
+    action = build_command_action(
+        make_action_configuration(env={"KEY": "value"}),
+        builder=make_configuration_builder(command_provider=command_provider),
     )
 
-    rule.actions[0].execute()
+    action.execute()
 
     command_provider.run.assert_called_once()
 
     request = command_provider.run.call_args.args[0]
 
     assert request.command == "echo test"
-    assert request.working_directory == BASE_DIRECTORY
+    assert request.working_directory == DEFAULT_BASE_DIRECTORY
     assert request.environment["KEY"] == "value"
+
+
+#####################
+# Trusted files tests
+#####################
+
+
+def test_builder_joins_trusted_files_with_base_directory_without_resolving_them(
+    tmp_path: Path,
+) -> None:
+    absolute_file = tmp_path / "absolute.sh"
+
+    action = build_command_action(
+        make_action_configuration(trusted_files=["scripts/a.sh", str(absolute_file)])
+    )
+
+    # Symbolic links are resolved by the verifier on every check, not once here
+    assert action.trusted_files == (
+        DEFAULT_BASE_DIRECTORY / SCRIPT_DIRECTORY_NAME / "a.sh",
+        absolute_file,
+    )
+
+
+def test_builder_passes_files_verifier_to_actions() -> None:
+    files_verifier = make_files_verifier()
+
+    action = build_command_action(
+        make_action_configuration(trusted_files=["a.sh"]),
+        builder=make_configuration_builder(files_verifier=files_verifier),
+    )
+
+    assert action.files_verifier is files_verifier
+
+
+def test_builder_builds_actions_without_trusted_files() -> None:
+    assert build_command_action().trusted_files == ()

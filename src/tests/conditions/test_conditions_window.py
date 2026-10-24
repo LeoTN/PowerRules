@@ -8,7 +8,7 @@ from powerrules.engine.exceptions import (
     ConditionEvaluationError,
     ConditionEvaluationProviderNotAvailableError,
 )
-from tests.mocks import make_window_provider
+from tests.factories import make_window_provider
 
 
 @pytest.mark.parametrize(

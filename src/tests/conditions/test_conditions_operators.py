@@ -2,7 +2,7 @@ import pytest
 
 from powerrules.conditions.operators import AndCondition, NotCondition, OrCondition
 from powerrules.engine.exceptions import ConditionEvaluationError
-from tests.mocks import make_condition
+from tests.factories import make_condition
 
 
 def test_nested_conditions_are_evaluated_correctly() -> None:

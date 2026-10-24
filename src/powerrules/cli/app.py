@@ -11,8 +11,20 @@ from powerrules.application.runtime import (
     PowerRulesRuntime,
     describe_actions,
 )
+from powerrules.application.trust import find_stale_entries, trust_policy
 from powerrules.cli.errors import cli_command
+from powerrules.cli.trust_output import (
+    create_trust_checker,
+    print_trust_reports,
+    report_trust,
+)
 from powerrules.config.loader import ConfigurationLoader
+from powerrules.platform.clock import SystemClockProvider
+from powerrules.trust.report import build_entry_report
+from powerrules.trust.store import (
+    TrustStatus,
+    TrustStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +67,7 @@ LogLevelFileOption = Annotated[
     ),
 ]
 
+
 # Main application
 app = typer.Typer(
     name="pwru",
@@ -69,7 +82,15 @@ policy_app = typer.Typer(
     no_args_is_help=True,
 )
 
+# Trust subcommand
+trust_app = typer.Typer(
+    name="trust",
+    help="Manage which policies are trusted.",
+    no_args_is_help=True,
+)
+
 app.add_typer(policy_app, name="policy")
+app.add_typer(trust_app, name="trust")
 
 
 def version_callback(value: bool) -> None:
@@ -108,7 +129,10 @@ def validate(
         console_level=log_level, log_file=log_file, file_level=log_level_file
     )
 
-    ConfigurationLoader().load(policy)
+    # Validating is the step before trusting a policy, so an untrusted policy is only reported as a warning
+    ConfigurationLoader(
+        trust_checker=create_trust_checker(False, always_show_table=True)
+    ).load(policy)
 
     # Theoretically, one could inject markdown via the file path
     console.print(f"Policy '{policy}' is valid", markup=False)
@@ -157,6 +181,11 @@ def run(
         "--dry-run",
         help="Evaluate the policy without executing any matching action.",
     ),
+    no_require_trust: bool = typer.Option(
+        False,
+        "--no-require-trust",
+        help="Run the policy even if it is not trusted or was modified since it was trusted (see 'trust add').",
+    ),
     policy: PolicyOption = DEFAULT_POLICY_PATH,
     log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
     log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
@@ -167,7 +196,10 @@ def run(
         console_level=log_level, log_file=log_file, file_level=log_level_file
     )
 
-    runtime = PowerRulesRuntime()
+    # Commands are only executed without a dry run, so trust is only required then
+    runtime = PowerRulesRuntime(
+        trust_checker=create_trust_checker(not dry_run and not no_require_trust)
+    )
 
     if once:
         logger.info(f"Running policy '{policy}' once...")
@@ -211,3 +243,157 @@ def run(
 
         if stop_on_match:
             logger.info("Rule matched, stopping evaluation")
+
+
+@trust_app.command("add")
+@cli_command
+def trust_add(
+    policy: PolicyOption = DEFAULT_POLICY_PATH,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
+    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
+    log_level_file: LogLevelFileOption = None,
+) -> None:
+    """Trust a PowerRules policy file, so modifications of it can be detected."""
+    configure_logging(
+        console_level=log_level, log_file=log_file, file_level=log_level_file
+    )
+
+    report = trust_policy(policy, TrustStore(), SystemClockProvider())
+
+    console.print(f"Policy '{policy}' is now trusted", markup=False)
+    report_trust(report, always_show_table=True)
+
+
+@trust_app.command("remove")
+@cli_command
+def trust_remove(
+    policy: PolicyOption = DEFAULT_POLICY_PATH,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
+    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
+    log_level_file: LogLevelFileOption = None,
+) -> None:
+    """Remove the trust of a PowerRules policy file."""
+    configure_logging(
+        console_level=log_level, log_file=log_file, file_level=log_level_file
+    )
+
+    if TrustStore().untrust([policy]):
+        console.print(f"Policy '{policy}' is no longer trusted", markup=False)
+    else:
+        console.print(f"Policy '{policy}' was not trusted", markup=False)
+
+
+@trust_app.command("list")
+@cli_command
+def trust_list(
+    trusted: bool = typer.Option(
+        False,
+        "--trusted",
+        help="Only show policies for which the policy and all trusted files are trusted.",
+    ),
+    modified: bool = typer.Option(
+        False,
+        "--modified",
+        help="Only show policies with a modified policy or trusted file.",
+    ),
+    missing: bool = typer.Option(
+        False,
+        "--missing",
+        help="Only show policies with a missing policy or trusted file.",
+    ),
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
+    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
+    log_level_file: LogLevelFileOption = None,
+) -> None:
+    """List all trusted policies and show their current trust status.
+
+    Several filters can be combined, a policy is shown if it matches at least one of them.
+    """
+    configure_logging(
+        console_level=log_level, log_file=log_file, file_level=log_level_file
+    )
+
+    entries = TrustStore().list_entries()
+
+    if not entries:
+        console.print("No policies are trusted")
+
+        return
+
+    reports = [build_entry_report(entry) for entry in entries]
+    selected_statuses = [
+        status
+        for status, is_selected in (
+            (TrustStatus.TRUSTED, trusted),
+            (TrustStatus.MODIFIED, modified),
+            (TrustStatus.MISSING, missing),
+        )
+        if is_selected
+    ]
+
+    if selected_statuses:
+        reports = [
+            report
+            for report in reports
+            if any(report.has_status(status) for status in selected_statuses)
+        ]
+
+        if not reports:
+            console.print("No trusted policies match the selected filters")
+
+            return
+
+    print_trust_reports(reports)
+
+
+def _format_policy_count(count: int) -> str:
+    """Return the count with the matching singular or plural of "policy"."""
+    return f"{count} {'policy' if count == 1 else 'policies'}"
+
+
+@trust_app.command("prune")
+@cli_command
+def trust_prune(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Only show which trusted policies would be removed.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Remove the policies without asking for confirmation.",
+    ),
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
+    log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
+    log_level_file: LogLevelFileOption = None,
+) -> None:
+    """Remove trusted policies whose policy file no longer exists."""
+    configure_logging(
+        console_level=log_level, log_file=log_file, file_level=log_level_file
+    )
+
+    trust_store = TrustStore()
+    stale_entries = find_stale_entries(trust_store)
+
+    if not stale_entries:
+        console.print("Nothing to prune")
+
+        return
+
+    print_trust_reports([build_entry_report(entry) for entry in stale_entries])
+
+    count = _format_policy_count(len(stale_entries))
+
+    if dry_run:
+        console.print(f"[DRY RUN] Would remove {count}", markup=False)
+
+        return
+
+    if not yes:
+        typer.confirm(f"Remove {count} from the trust store?", abort=True)
+
+    trust_store.untrust(Path(entry.path) for entry in stale_entries)
+
+    console.print(f"Removed {count} from the trust store")
