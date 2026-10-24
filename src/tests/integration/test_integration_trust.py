@@ -190,7 +190,7 @@ def test_trust_removed_while_running_stops_actions_with_trusted_files(
     trust_policy_with_fixed_time(trust_store, policy)
     engine = build_trusted_rule_engine(trust_store, policy)
 
-    trust_store.untrust(policy)
+    trust_store.untrust([policy])
 
     with pytest.raises(FileIntegrityError, match="is not trusted yet"):
         engine.evaluate()

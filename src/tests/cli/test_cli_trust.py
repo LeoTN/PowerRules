@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 from unittest.mock import Mock
 
+import pytest
 from typer.testing import CliRunner
 
 from powerrules.cli.app import app
@@ -11,7 +12,7 @@ from powerrules.trust.store import (
     TRUST_STORE_FILE_NAME,
     TrustStore,
 )
-from tests.factories import write_backup_script_policy
+from tests.factories import trust_policies_with_each_status, write_backup_script_policy
 from tests.helpers import (
     BACKUP_SCRIPT_RELATIVE_PATH,
     get_plain_output,
@@ -387,3 +388,195 @@ def test_cli_policy_run_does_not_run_policy_after_trust_was_removed(
 
     assert result.exit_code == EXIT_POLICY_TRUST_ERROR
     command_provider.run.assert_not_called()
+
+
+###################
+# trust prune tests
+###################
+
+
+def test_cli_trust_prune_removes_stale_policy_without_confirmation(
+    tmp_path: Path,
+) -> None:
+    policy_file = write_backup_script_policy(tmp_path)
+    trust_policy_via_cli(policy_file)
+    policy_file.unlink()
+
+    result = runner.invoke(app, ["trust", "prune", "--yes"])
+
+    assert result.exit_code == 0
+    assert "Removed 1 policy from the trust store" in get_plain_output(result)
+    assert TrustStore().get_entry(policy_file) is None
+
+
+def test_cli_trust_prune_shows_the_policies_which_are_removed(tmp_path: Path) -> None:
+    policy_file = write_backup_script_policy(tmp_path)
+    trust_policy_via_cli(policy_file)
+    policy_file.unlink()
+
+    result = runner.invoke(app, ["trust", "prune", "--yes"])
+
+    assert "missing" in get_table_row(result.stdout, policy_file.resolve())
+
+
+def test_cli_trust_prune_keeps_existing_policies_and_uses_plural(
+    tmp_path: Path,
+) -> None:
+    policies = trust_policies_with_each_status(tmp_path)
+    second_deleted = write_backup_script_policy(tmp_path / "d")
+    trust_policy_via_cli(second_deleted)
+    second_deleted.unlink()
+
+    result = runner.invoke(app, ["trust", "prune", "--yes"])
+
+    assert result.exit_code == 0
+    assert "Removed 2 policies from the trust store" in get_plain_output(result)
+    assert TrustStore().get_entry(policies["a"]) is not None
+    # A modified policy still exists, so it is not pruned
+    assert TrustStore().get_entry(policies["b"]) is not None
+    assert TrustStore().get_entry(policies["c"]) is None
+    assert TrustStore().get_entry(second_deleted) is None
+
+
+def test_cli_trust_prune_reports_nothing_to_prune_for_empty_store() -> None:
+    result = runner.invoke(app, ["trust", "prune"])
+
+    assert result.exit_code == 0
+    assert "Nothing to prune" in get_plain_output(result)
+
+
+def test_cli_trust_prune_reports_nothing_to_prune_if_all_policies_exist(
+    tmp_path: Path,
+) -> None:
+    policy_file = write_backup_script_policy(tmp_path)
+    trust_policy_via_cli(policy_file)
+
+    result = runner.invoke(app, ["trust", "prune"])
+
+    assert result.exit_code == 0
+    assert "Nothing to prune" in get_plain_output(result)
+    assert TrustStore().get_entry(policy_file) is not None
+
+
+def test_cli_trust_prune_dry_run_keeps_policies_and_does_not_ask(
+    tmp_path: Path,
+) -> None:
+    policy_file = write_backup_script_policy(tmp_path)
+    trust_policy_via_cli(policy_file)
+    policy_file.unlink()
+
+    # No input is given, so a confirmation prompt would abort the command
+    result = runner.invoke(app, ["trust", "prune", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "[DRY RUN] Would remove 1 policy" in get_plain_output(result)
+    assert "Removed" not in get_plain_output(result)
+    assert TrustStore().get_entry(policy_file) is not None
+
+
+def test_cli_trust_prune_removes_policy_after_confirmation(tmp_path: Path) -> None:
+    policy_file = write_backup_script_policy(tmp_path)
+    trust_policy_via_cli(policy_file)
+    policy_file.unlink()
+
+    result = runner.invoke(app, ["trust", "prune"], input="y\n")
+
+    assert result.exit_code == 0
+    assert "Remove 1 policy from the trust store?" in get_plain_output(result)
+    assert TrustStore().get_entry(policy_file) is None
+
+
+@pytest.mark.parametrize("answer", ["n\n", ""], ids=["declined", "no-input"])
+def test_cli_trust_prune_keeps_policy_if_not_confirmed(
+    tmp_path: Path, answer: str
+) -> None:
+    policy_file = write_backup_script_policy(tmp_path)
+    trust_policy_via_cli(policy_file)
+    policy_file.unlink()
+
+    result = runner.invoke(app, ["trust", "prune"], input=answer)
+
+    assert result.exit_code == 1
+    assert "Aborted" in result.output
+    # An abort is no unexpected error
+    assert "Unexpected error" not in result.output
+    assert TrustStore().get_entry(policy_file) is not None
+
+
+def test_cli_trust_prune_reports_unusable_trust_store(isolated_home: Path) -> None:
+    store_file = isolated_home / TRUST_STORE_DIRECTORY_NAME / TRUST_STORE_FILE_NAME
+    store_file.parent.mkdir()
+    store_file.write_text("not json", encoding="utf-8")
+
+    result = runner.invoke(app, ["trust", "prune", "--yes"])
+
+    assert result.exit_code == 1
+    assert "corrupted or has an unsupported format" in result.output
+
+
+#########################
+# trust list filter tests
+#########################
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected_names"),
+    [
+        (["--trusted"], {"a"}),
+        (["--modified"], {"b"}),
+        (["--missing"], {"c"}),
+        (["--trusted", "--modified"], {"a", "b"}),
+        (["--modified", "--missing"], {"b", "c"}),
+        (["--trusted", "--modified", "--missing"], {"a", "b", "c"}),
+    ],
+)
+def test_cli_trust_list_filters_policies_by_status(
+    tmp_path: Path,
+    flags: list[str],
+    expected_names: set[str],
+) -> None:
+    policies = trust_policies_with_each_status(tmp_path)
+
+    result = runner.invoke(app, ["trust", "list", *flags])
+
+    assert result.exit_code == 0
+
+    for name, policy_file in policies.items():
+        assert (str(policy_file.resolve()) in get_plain_output(result)) is (
+            name in expected_names
+        )
+
+
+def test_cli_trust_list_filter_matches_policy_with_modified_trusted_file(
+    tmp_path: Path,
+) -> None:
+    policy_file = write_backup_script_policy(tmp_path)
+    trust_policy_via_cli(policy_file)
+    script = (tmp_path / BACKUP_SCRIPT_RELATIVE_PATH).resolve()
+    modify_file(script)
+
+    modified_result = runner.invoke(app, ["trust", "list", "--modified"])
+    trusted_result = runner.invoke(app, ["trust", "list", "--trusted"])
+
+    # The policy itself is unchanged, but it is only trusted if its files are as well
+    assert "trusted" in get_table_row(modified_result.stdout, policy_file.resolve())
+    assert "modified" in get_table_row(modified_result.stdout, script)
+    assert str(policy_file.resolve()) not in get_plain_output(trusted_result)
+
+
+def test_cli_trust_list_reports_no_match_without_table(tmp_path: Path) -> None:
+    policy_file = write_backup_script_policy(tmp_path)
+    trust_policy_via_cli(policy_file)
+
+    result = runner.invoke(app, ["trust", "list", "--missing"])
+
+    assert result.exit_code == 0
+    assert "No trusted policies match the selected filters" in get_plain_output(result)
+    assert "Trust status" not in get_plain_output(result)
+
+
+def test_cli_trust_list_with_filter_reports_empty_store() -> None:
+    result = runner.invoke(app, ["trust", "list", "--modified"])
+
+    assert result.exit_code == 0
+    assert "No policies are trusted" in get_plain_output(result)

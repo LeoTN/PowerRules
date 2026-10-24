@@ -150,6 +150,15 @@ def test_cli_command_does_not_intercept_typer_exit() -> None:
     assert exc_info.value.exit_code == 42
 
 
+def test_cli_command_does_not_intercept_typer_abort() -> None:
+    @cli_command
+    def aborting_command() -> None:
+        raise typer.Abort()
+
+    with pytest.raises(typer.Abort):
+        aborting_command()
+
+
 #############
 # Trust tests
 #############

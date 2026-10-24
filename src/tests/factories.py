@@ -62,6 +62,8 @@ from tests.helpers import (
     DEFAULT_NOW_SATURDAY_NOON,
     DEFAULT_WORKING_DIRECTORY,
     TRUSTED_AT,
+    modify_file,
+    trust_policy_via_cli,
     write_policy,
     write_workspace_scripts,
 )
@@ -575,6 +577,21 @@ def trust_policy_with_fixed_time(
         trusted_at: Time at which the policy is trusted.
     """
     trust_policy(policy, trust_store, make_clock_provider(trusted_at))
+
+
+def trust_policies_with_each_status(tmp_path: Path) -> dict[str, Path]:
+    """Trust three policies and then leave "a" unchanged, modify "b" and delete "c"."""
+    policies = {
+        name: write_backup_script_policy(tmp_path / name) for name in ("a", "b", "c")
+    }
+
+    for policy_file in policies.values():
+        trust_policy_via_cli(policy_file)
+
+    modify_file(policies["b"])
+    policies["c"].unlink()
+
+    return policies
 
 
 ######################################

@@ -13,7 +13,11 @@ from powerrules.trust.store import (
     TrustStatus,
     compute_file_digest,
 )
-from tests.factories import make_trust_entry, make_trusted_file_entries
+from tests.factories import (
+    make_trust_entry,
+    make_trust_report,
+    make_trusted_file_entries,
+)
 from tests.helpers import (
     TRUSTED_AT,
     create_symlink,
@@ -68,6 +72,62 @@ def test_trust_report_is_trusted_only_if_every_entry_is_trusted() -> None:
             TrustReport((trusted, TrustReportEntry(Path("b"), status))).is_trusted
             is False
         )
+
+
+##################
+# has_status tests
+##################
+
+
+@pytest.mark.parametrize(
+    ("policy_status", "file_statuses", "status", "expected"),
+    [
+        # Everything is trusted
+        (TrustStatus.TRUSTED, (), TrustStatus.TRUSTED, True),
+        (TrustStatus.TRUSTED, (TrustStatus.TRUSTED,), TrustStatus.TRUSTED, True),
+        (TrustStatus.TRUSTED, (TrustStatus.TRUSTED,), TrustStatus.MODIFIED, False),
+        (TrustStatus.TRUSTED, (TrustStatus.TRUSTED,), TrustStatus.MISSING, False),
+        # "trusted" requires the policy and every file to be trusted
+        (TrustStatus.TRUSTED, (TrustStatus.MODIFIED,), TrustStatus.TRUSTED, False),
+        (TrustStatus.MODIFIED, (TrustStatus.TRUSTED,), TrustStatus.TRUSTED, False),
+        # Any other status matches if the policy or one of the files has it
+        (TrustStatus.TRUSTED, (TrustStatus.MODIFIED,), TrustStatus.MODIFIED, True),
+        (TrustStatus.MODIFIED, (TrustStatus.TRUSTED,), TrustStatus.MODIFIED, True),
+        (TrustStatus.TRUSTED, (TrustStatus.MODIFIED,), TrustStatus.MISSING, False),
+        (TrustStatus.MISSING, (TrustStatus.TRUSTED,), TrustStatus.MISSING, True),
+        (
+            TrustStatus.TRUSTED,
+            (TrustStatus.TRUSTED, TrustStatus.MISSING),
+            TrustStatus.MISSING,
+            True,
+        ),
+        (TrustStatus.TRUSTED, (TrustStatus.UNKNOWN,), TrustStatus.UNKNOWN, True),
+        # A report can match several statuses at once
+        (
+            TrustStatus.MISSING,
+            (TrustStatus.MODIFIED,),
+            TrustStatus.MODIFIED,
+            True,
+        ),
+        (
+            TrustStatus.MISSING,
+            (TrustStatus.MODIFIED,),
+            TrustStatus.MISSING,
+            True,
+        ),
+    ],
+)
+def test_trust_report_has_status(
+    policy_status: TrustStatus,
+    file_statuses: tuple[TrustStatus, ...],
+    status: TrustStatus,
+    expected: bool,
+) -> None:
+    report = make_trust_report(
+        "/policies/a.yaml", *file_statuses, policy_status=policy_status
+    )
+
+    assert report.has_status(status) is expected
 
 
 ##################

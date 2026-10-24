@@ -20,9 +20,11 @@ from powerrules.trust.store import (
     compute_file_digest,
     compute_trusted_file_digests,
     get_digest_status,
+    is_policy_missing,
     make_path_key,
     resolve_trusted_files,
 )
+from tests.factories import make_trust_entry
 from tests.helpers import (
     BACKUP_SCRIPT_NAME,
     SCRIPT_DIRECTORY_NAME,
@@ -399,7 +401,7 @@ def test_trust_store_untrust_removes_entry(
     trust_store.trust(policy, "sha256:policy", TRUSTED_AT)
     trust_store.trust(other, "sha256:other", TRUSTED_AT)
 
-    assert trust_store.untrust(policy) is True
+    assert trust_store.untrust([policy]) == 1
     assert trust_store.get_entry(policy) is None
     assert trust_store.get_entry(other) is not None
 
@@ -407,7 +409,7 @@ def test_trust_store_untrust_removes_entry(
 def test_trust_store_untrust_returns_false_for_unknown_policy(
     trust_store: TrustStore, trust_store_path: Path, tmp_path: Path
 ) -> None:
-    assert trust_store.untrust(tmp_path / "powerrules.yaml") is False
+    assert trust_store.untrust([tmp_path / "powerrules.yaml"]) == 0
     # Nothing was written
     assert not trust_store_path.exists()
 
@@ -420,7 +422,7 @@ def test_trust_store_untrust_works_for_deleted_policy(
     trust_store.trust(policy, "sha256:policy", TRUSTED_AT)
     policy.unlink()
 
-    assert trust_store.untrust(policy) is True
+    assert trust_store.untrust([policy]) == 1
 
 
 ####################
@@ -445,6 +447,91 @@ def test_trust_store_lists_entries_sorted_by_path(
         "b.yaml",
         "c.yaml",
     ]
+
+
+#########################
+# untrust (several) tests
+#########################
+
+
+def test_trust_store_untrust_removes_several_policies_at_once(
+    trust_store: TrustStore, tmp_path: Path
+) -> None:
+    policies = [tmp_path / name for name in ("a.yaml", "b.yaml", "c.yaml")]
+
+    for policy in policies:
+        trust_store.trust(policy, f"sha256:{policy.name}", TRUSTED_AT)
+
+    # Any iterable is accepted, not only a sequence
+    assert trust_store.untrust(policy for policy in policies[:2]) == 2
+    assert [Path(entry.path).name for entry in trust_store.list_entries()] == ["c.yaml"]
+
+
+def test_trust_store_untrust_counts_only_policies_which_were_trusted(
+    trust_store: TrustStore, tmp_path: Path
+) -> None:
+    trusted = tmp_path / "trusted.yaml"
+    unknown = tmp_path / "unknown.yaml"
+    trust_store.trust(trusted, "sha256:policy", TRUSTED_AT)
+
+    # The same policy twice is only removed once
+    assert trust_store.untrust([trusted, unknown, trusted]) == 1
+    assert trust_store.list_entries() == ()
+
+
+def test_trust_store_untrust_without_policies_does_not_write(
+    trust_store: TrustStore, trust_store_path: Path
+) -> None:
+    assert trust_store.untrust([]) == 0
+    assert not trust_store_path.exists()
+
+
+#########################
+# is_policy_missing tests
+#########################
+
+
+def test_is_policy_missing_is_false_for_existing_policy(policy: Path) -> None:
+    assert is_policy_missing(make_trust_entry(policy)) is False
+
+
+def test_is_policy_missing_is_true_for_deleted_policy(policy: Path) -> None:
+    entry = make_trust_entry(policy)
+    policy.unlink()
+
+    assert is_policy_missing(entry) is True
+
+
+def test_is_policy_missing_is_true_if_parent_directory_does_not_exist(
+    tmp_path: Path,
+) -> None:
+    entry = TrustEntry(
+        path=str(tmp_path / "deleted" / "powerrules.yaml"),
+        digest="sha256:policy",
+        trusted_at=TRUSTED_AT,
+    )
+
+    assert is_policy_missing(entry) is True
+
+
+def test_is_policy_missing_is_true_if_parent_is_a_file(policy: Path) -> None:
+    entry = TrustEntry(
+        path=str(policy / "powerrules.yaml"),
+        digest="sha256:policy",
+        trusted_at=TRUSTED_AT,
+    )
+
+    assert is_policy_missing(entry) is True
+
+
+# A policy which cannot be accessed may still exist, so its trust must not be pruned
+def test_is_policy_missing_is_false_for_errors_which_do_not_prove_absence(
+    policy: Path,
+) -> None:
+    entry = make_trust_entry(policy)
+
+    with patch.object(Path, "stat", side_effect=PermissionError("Test failure")):
+        assert is_policy_missing(entry) is False
 
 
 ###########################

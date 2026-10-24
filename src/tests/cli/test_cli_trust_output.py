@@ -1,10 +1,13 @@
 import logging
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+from rich.text import Text
 
 from powerrules.application.invocation import build_trust_command
 from powerrules.cli.trust_output import (
+    _get_branch,
     create_trust_checker,
     print_trust_report,
     print_trust_reports,
@@ -16,6 +19,7 @@ from tests.factories import make_trust_report
 from tests.helpers import TRUSTED_AT, get_log_records
 
 LOGGER_NAME = "powerrules.cli.trust_output"
+MODULE = "powerrules.cli.trust_output"
 _TRUSTED_AT_FORMAT = "%Y-%m-%d %H:%M"
 
 
@@ -157,6 +161,71 @@ def test_print_trust_report_does_not_interpret_paths_as_markup(
 
     # The path is platform dependent (separators), but the markup tags must stay visible
     assert str(path) in capsys.readouterr().out
+
+
+####################
+# table layout tests
+####################
+
+
+def test_print_trust_reports_shows_trusted_files_as_branches_below_their_policy(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    print_trust_report(
+        make_trust_report("/policies/a.yaml", TrustStatus.TRUSTED, TrustStatus.MODIFIED)
+    )
+
+    output = Text.from_ansi(capsys.readouterr().out)
+    first_file = Path("/policies/a.yaml.file0")
+    last_file = Path("/policies/a.yaml.file1")
+
+    # The console of the test may not support Unicode, so both variants are accepted
+    assert f"├─ {first_file}" in output or f"|- {first_file}" in output
+    assert f"└─ {last_file}" in output or f"`- {last_file}" in output
+
+
+def test_print_trust_reports_separates_policies_with_a_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def count_rule_lines(output: str) -> int:
+        return sum(
+            1
+            for line in output.splitlines()
+            if line.strip() and set(line.strip()) <= {"─", "-"}
+        )
+
+    print_trust_reports([make_trust_report("/policies/a.yaml", TrustStatus.TRUSTED)])
+    single_policy_lines = count_rule_lines(capsys.readouterr().out)
+
+    print_trust_reports(
+        [
+            make_trust_report("/policies/a.yaml", TrustStatus.TRUSTED),
+            make_trust_report("/policies/b.yaml", TrustStatus.TRUSTED),
+        ]
+    )
+
+    # Every additional policy adds exactly one separator
+    assert count_rule_lines(capsys.readouterr().out) == single_policy_lines + 1
+
+
+@pytest.mark.parametrize(
+    ("ascii_only", "is_last", "expected"),
+    [
+        (False, False, "├─ "),
+        (False, True, "└─ "),
+        (True, False, "|- "),
+        (True, True, "`- "),
+    ],
+)
+def test_get_branch_uses_ascii_fallback_for_consoles_without_unicode(
+    ascii_only: bool,
+    is_last: bool,
+    expected: str,
+) -> None:
+    with patch(f"{MODULE}.console") as console:
+        console.options.ascii_only = ascii_only
+
+        assert _get_branch(is_last) == expected
 
 
 ############################

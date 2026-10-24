@@ -51,6 +51,23 @@ class TrustReport:
         """Whether the policy and all of its trusted files are trusted."""
         return all(entry.status is TrustStatus.TRUSTED for entry in self.entries)
 
+    def has_status(self, status: TrustStatus) -> bool:
+        """Whether the report matches a status.
+
+        "trusted" only matches if everything is trusted. Any other status matches if the policy or one of its files has it.
+        The distinction is made as only a policy with all its trusted files trusted can be executed and is therefore seen as trusted.
+
+        Args:
+            status: The status to look for.
+
+        Returns:
+            True if the report matches the status, otherwise False.
+        """
+        if status is TrustStatus.TRUSTED:
+            return self.is_trusted
+
+        return any(entry.status is status for entry in self.entries)
+
 
 def check_file(
     file: Path, trusted_files: Mapping[str, TrustedFileEntry]

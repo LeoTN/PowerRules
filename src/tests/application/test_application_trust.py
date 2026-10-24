@@ -4,7 +4,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from powerrules.application.trust import trust_policy
+from powerrules.application.trust import find_stale_entries, trust_policy
 from powerrules.engine.exceptions import FileIntegrityError
 from powerrules.trust.store import (
     TrustedFileEntry,
@@ -173,3 +173,45 @@ def test_trust_policy_rejects_missing_trusted_file_without_saving_anything(
         trust_policy(policy, trust_store, make_clock_provider(TRUSTED_AT))
 
     assert trust_store.get_entry(policy) is None
+
+
+##########################
+# find_stale_entries tests
+##########################
+
+
+def test_find_stale_entries_returns_only_policies_which_no_longer_exist(
+    trust_store: TrustStore, tmp_path: Path
+) -> None:
+    existing = write_policy(tmp_path / "a", make_policy_yaml())
+    deleted_first = write_policy(tmp_path / "b", make_policy_yaml())
+    deleted_second = write_policy(tmp_path / "c", make_policy_yaml())
+
+    for policy in (existing, deleted_first, deleted_second):
+        trust_policy(policy, trust_store, make_clock_provider(TRUSTED_AT))
+
+    deleted_second.unlink()
+    deleted_first.unlink()
+
+    # The entries are sorted by their path
+    assert [entry.path for entry in find_stale_entries(trust_store)] == [
+        str(deleted_first.resolve()),
+        str(deleted_second.resolve()),
+    ]
+
+
+def test_find_stale_entries_returns_nothing_for_empty_store(
+    trust_store: TrustStore,
+) -> None:
+    assert find_stale_entries(trust_store) == ()
+
+
+def test_find_stale_entries_keeps_policy_with_missing_trusted_file(
+    trust_store: TrustStore, workspace: Path
+) -> None:
+    policy = write_policy(workspace, POLICY_WITH_TRUSTED_FILES)
+    trust_policy(policy, trust_store, make_clock_provider(TRUSTED_AT))
+    (workspace / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME).unlink()
+
+    # The policy itself still exists, a missing file has to be fixed with "trust add"
+    assert find_stale_entries(trust_store) == ()

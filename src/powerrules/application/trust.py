@@ -4,9 +4,11 @@ from powerrules.config.loader import ConfigurationLoader
 from powerrules.providers.clock import ClockProvider
 from powerrules.trust.report import TrustReport, build_trust_report
 from powerrules.trust.store import (
+    TrustEntry,
     TrustStore,
     compute_digest,
     compute_trusted_file_digests,
+    is_policy_missing,
 )
 
 
@@ -48,4 +50,21 @@ def trust_policy(
         digest,
         trust_store.get_entry(resolved_policy),
         trusted_files,
+    )
+
+
+def find_stale_entries(trust_store: TrustStore) -> tuple[TrustEntry, ...]:
+    """Find the trusted policies whose policy file no longer exists.
+
+    Args:
+        trust_store: Store which is searched.
+
+    Returns:
+        The stale entries sorted by their path.
+
+    Raises:
+        TrustStoreError: If the trust store cannot be read.
+    """
+    return tuple(
+        entry for entry in trust_store.list_entries() if is_policy_missing(entry)
     )

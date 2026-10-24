@@ -73,6 +73,27 @@ def get_digest_status(trusted_digest: str | None, current_digest: str) -> TrustS
     return TrustStatus.TRUSTED
 
 
+def is_policy_missing(entry: TrustEntry) -> bool:
+    """Return whether the policy file of a trust entry no longer exists.
+
+    Other errors (e.g. missing permissions) do not prove that the policy is gone, so they are not treated as missing.
+
+    Args:
+        entry: The trust entry of the policy.
+
+    Returns:
+        True if the file or one of its parent directories does not exist, otherwise False.
+    """
+    try:
+        Path(entry.path).stat()
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        return False
+
+    return False
+
+
 class _TrustStoreFile(BaseModel):
     """Content of the trust store file."""
 
@@ -263,26 +284,29 @@ class TrustStore:
 
         self._write(store_file)
 
-    def untrust(self, policy_path: Path) -> bool:
-        """Remove the trust of a policy. The policy file does not have to exist.
+    def untrust(self, policy_paths: Iterable[Path]) -> int:
+        """Remove the trust of one or more policies with a single write. The policy files do not have to exist.
 
         Args:
-            policy_path: Path of the policy file.
+            policy_paths: Paths of the policy files. A single policy is passed as a one-element sequence.
 
         Returns:
-            True if the policy was trusted before, otherwise False.
+            The number of policies which were trusted before and are removed now.
 
         Raises:
             TrustStoreError: If the trust store cannot be read or written.
         """
         store_file = self._read()
+        removed_count = sum(
+            store_file.policies.pop(make_path_key(policy_path), None) is not None
+            for policy_path in policy_paths
+        )
 
-        if store_file.policies.pop(make_path_key(policy_path), None) is None:
-            return False
+        # Nothing is written if no policy was trusted
+        if removed_count:
+            self._write(store_file)
 
-        self._write(store_file)
-
-        return True
+        return removed_count
 
     def list_entries(self) -> tuple[TrustEntry, ...]:
         """Return all trusted policies sorted by their path.

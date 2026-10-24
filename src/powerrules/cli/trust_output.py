@@ -23,16 +23,28 @@ _TRUST_STATUS_STYLES = {
 _TRUSTED_AT_FORMAT = "%Y-%m-%d %H:%M"
 
 
+def _get_branch(is_last: bool) -> str:
+    """Return the tree branch in front of a trusted file. Alternatively, an ASCII fallback for consoles without UTF-8."""
+    if console.options.ascii_only:
+        return "`- " if is_last else "|- "
+
+    return "└─ " if is_last else "├─ "
+
+
 def print_trust_reports(reports: Sequence[TrustReport]) -> None:
     """Print the trust status of one or more policies and their trusted files as a single table.
 
+    Each policy is shown in bold with its trusted files below it, policies are separated by a line.
+
     Args:
-        reports: The reports to print. Each policy starts a new section of the table.
+        reports: The reports to print.
     """
     table = Table(
         title="Trust status",
         title_justify="left",
-        box=box.SIMPLE_HEAD,
+        title_style="bold",
+        header_style="bold",
+        box=box.HORIZONTALS,
         pad_edge=False,
     )
     table.add_column("Status")
@@ -44,9 +56,19 @@ def print_trust_reports(reports: Sequence[TrustReport]) -> None:
         if index > 0:
             table.add_section()
 
-        for entry in report.entries:
+        last_index = len(report.entries) - 1
+
+        for entry_index, entry in enumerate(report.entries):
             # Text objects are used on purpose, so paths are never interpreted as markup
-            path = Text(str(entry.path))
+            path = Text()
+
+            if entry.is_policy:
+                path.append(str(entry.path), style="bold")
+            else:
+                path.append(
+                    _get_branch(entry_index == last_index), style="bright_black"
+                )
+                path.append(str(entry.path))
 
             # The reason why a file cannot be read
             if entry.detail:
