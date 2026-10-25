@@ -8,8 +8,10 @@ from rich.markup import escape
 
 from powerrules.application.logging import LogLevel, configure_logging, console
 from powerrules.application.runtime import (
+    DEFAULT_EVALUATION_INTERVAL_SECONDS,
     PowerRulesRuntime,
     describe_actions,
+    validate_evaluation_interval,
 )
 from powerrules.application.trust import find_stale_entries, trust_policy
 from powerrules.cli.errors import cli_command
@@ -103,6 +105,26 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def interval_callback(value: float) -> float:
+    """Validate the evaluation interval and report an invalid one as a usage error.
+
+    Args:
+        value: Interval in seconds given on the command line.
+
+    Returns:
+        The unchanged interval.
+
+    Raises:
+        typer.BadParameter: If the interval is not usable, which results in exit code 2.
+    """
+    try:
+        validate_evaluation_interval(value)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from e
+
+    return value
+
+
 @app.callback()
 def main(
     version: bool = typer.Option(
@@ -131,7 +153,7 @@ def validate(
 
     # Validating is the step before trusting a policy, so an untrusted policy is only reported as a warning
     ConfigurationLoader(
-        trust_checker=create_trust_checker(False, always_show_table=True)
+        trust_checker=create_trust_checker(False, False, always_show_table=True)
     ).load(policy)
 
     # Theoretically, one could inject markdown via the file path
@@ -186,6 +208,12 @@ def run(
         "--no-require-trust",
         help="Run the policy even if it is not trusted or was modified since it was trusted (see 'trust add').",
     ),
+    interval: float = typer.Option(
+        DEFAULT_EVALUATION_INTERVAL_SECONDS,
+        "--interval",
+        help="Seconds between the starts of two evaluations. Has no effect together with --once.",
+        callback=interval_callback,
+    ),
     policy: PolicyOption = DEFAULT_POLICY_PATH,
     log_level: LogLevelOption = DEFAULT_LOG_LEVEL,
     log_file: LogFileOption = DEFAULT_LOG_FILE_PATH,
@@ -196,9 +224,12 @@ def run(
         console_level=log_level, log_file=log_file, file_level=log_level_file
     )
 
-    # Commands are only executed without a dry run, so trust is only required then
+    # Commands of actions are only executed without a dry run, commands of conditions are always executed
     runtime = PowerRulesRuntime(
-        trust_checker=create_trust_checker(not dry_run and not no_require_trust)
+        trust_checker=create_trust_checker(
+            require_trust_for_actions=not dry_run and not no_require_trust,
+            require_trust_for_conditions=not no_require_trust,
+        )
     )
 
     if once:
@@ -223,6 +254,7 @@ def run(
 
     for result in runtime.run_continuously(
         configuration_path=policy,
+        evaluation_interval=interval,
         stop_on_match=stop_on_match,
         dry_run=dry_run,
     ):

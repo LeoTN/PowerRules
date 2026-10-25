@@ -10,5 +10,7 @@ class Condition(Protocol):
 
         Raises:
             ConditionEvaluationError: If the condition cannot be evaluated.
+            FileIntegrityError: If trust is required and a trusted file of a command condition cannot be read,
+                is not trusted yet or was modified.
         """
         ...

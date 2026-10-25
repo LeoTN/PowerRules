@@ -8,6 +8,7 @@ class MatchType(StrEnum):
 
     EXACT = "exact"
     REGEX = "regex"
+    CONTAINS = "contains"
 
 
 class StringMatcher:
@@ -32,6 +33,12 @@ class StringMatcher:
 
             return value.casefold() == self.pattern.casefold()
 
+        if self.match_type == MatchType.CONTAINS:
+            if self.case_sensitive:
+                return self.pattern in value
+
+            return self.pattern.casefold() in value.casefold()
+
         return (
             self._compiled_pattern is not None
             and self._compiled_pattern.fullmatch(value) is not None
@@ -41,7 +48,11 @@ class StringMatcher:
         if self.match_type != MatchType.REGEX:
             return None
 
-        # Ignore case if case_sensitive is False, otherwise use 0 (no flags)
-        flags = 0 if self.case_sensitive else re.IGNORECASE
+        # "." also matches line breaks, so a pattern like ".*error.*" works on multi-line command output
+        flags = re.DOTALL
+
+        # Ignore case if case_sensitive is False
+        if not self.case_sensitive:
+            flags |= re.IGNORECASE
 
         return re.compile(self.pattern, flags)

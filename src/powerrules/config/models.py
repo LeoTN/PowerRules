@@ -1,3 +1,4 @@
+import math
 import re
 from datetime import date, datetime, time
 from enum import StrEnum
@@ -312,72 +313,26 @@ class WindowConditionConfiguration(BaseModel):
     match: MatchConfiguration = Field(default_factory=MatchConfiguration)
 
 
-class ConditionConfiguration(BaseModel):
-    """Configuration for a condition tree."""
+class OutputMatchConfiguration(BaseModel):
+    """Configuration for the expected output (stdout or stderr) of a command."""
 
-    model_config = ConfigDict(
-        extra="forbid",
-        validate_by_name=True,
-    )
+    model_config = ConfigDict(extra="forbid")
 
-    and_conditions: list["ConditionConfiguration"] | None = Field(
-        default=None,
-        validation_alias="and",
-        serialization_alias="and",
-    )
-    or_conditions: list["ConditionConfiguration"] | None = Field(
-        default=None,
-        validation_alias="or",
-        serialization_alias="or",
-    )
-    not_condition: "ConditionConfiguration | None" = Field(
-        default=None,
-        validation_alias="not",
-        serialization_alias="not",
-    )
-    process: ProcessConditionConfiguration | None = None
-    datetime: DateTimeConditionConfiguration | None = None
-    window: WindowConditionConfiguration | None = None
-
-    @model_validator(mode="after")
-    def validate_variant(self) -> "ConditionConfiguration":
-        configured_variants = sum(
-            value is not None
-            for value in (
-                self.and_conditions,
-                self.or_conditions,
-                self.not_condition,
-                self.process,
-                self.datetime,
-                self.window,
-            )
-        )
-
-        if configured_variants != 1:
-            raise ValueError(
-                "A condition must define exactly one of 'and', 'or', 'not', 'process', 'datetime' or 'window'"
-            )
-
-        if self.and_conditions is not None and len(self.and_conditions) < 2:
-            raise ValueError("An 'and' condition must contain at least two conditions")
-
-        if self.or_conditions is not None and len(self.or_conditions) < 2:
-            raise ValueError("An 'or' condition must contain at least two conditions")
-
-        return self
+    value: str
+    match: MatchConfiguration = Field(default_factory=MatchConfiguration)
 
 
-class ActionConfiguration(BaseModel):
-    """Configuration for an action which runs a command.
+class CommandConfiguration(BaseModel):
+    """Configuration for a command which is run in a shell.
 
-    Unset optional values fall back to their defaults when the action is built.
+    This is the common base of actions and command conditions.
+    Unset optional values fall back to their defaults when the command is built.
     For example, the default shell depends on the operating system.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     run: str
-    name: str | None = None
     shell: Shell | None = None
     working_directory: Path | None = None
     # The values may be secrets, so they are excluded from the representation of the model
@@ -387,12 +342,14 @@ class ActionConfiguration(BaseModel):
     success_exit_codes: list[StrictInt] = Field(
         default_factory=lambda: [0], min_length=1
     )
-    wait: StrictBool = True
-    continue_on_error: StrictBool = False
+    # Expected output, it is compared after leading and trailing whitespace was removed
+    stdout: OutputMatchConfiguration | None = None
+    stderr: OutputMatchConfiguration | None = None
     # Files (e.g. scripts) the command depends on, relative paths are resolved against the directory of the policy
     trusted_files: list[Path] = Field(default_factory=list)
 
-    @field_validator("run", "name")
+    # "name" only exists in subclasses (actions), so the field is not checked here
+    @field_validator("run", "name", check_fields=False)
     @classmethod
     def validate_not_blank(cls, value: str | None, info: ValidationInfo) -> str | None:
         """Validate that a configured text is not empty or whitespace only.
@@ -485,53 +442,32 @@ class ActionConfiguration(BaseModel):
     @field_validator("timeout")
     @classmethod
     def validate_timeout(cls, value: float | None) -> float | None:
-        """Validate that the timeout is positive.
+        """Validate that the timeout is positive and normalize an infinite timeout.
 
         Args:
             value: Configured timeout in seconds, or None for no time limit.
 
         Returns:
-            The validated timeout.
+            The validated timeout. An infinite timeout (YAML ".inf") is returned as None.
 
         Raises:
             ValueError: If the timeout is not greater than zero.
         """
-        # "not value > 0" also rejects NaN
-        if value is not None and not value > 0:
+        if value is None:
+            return None
+
+        # "not value > 0" also rejects NaN. This has to happen before the check for infinity
+        if not value > 0:
             raise ValueError(
                 "'timeout' must be greater than zero (use null for no time limit)"
             )
 
+        # An infinite timeout means "no time limit", which is what None expresses.
+        # Passing "inf" on would fail later in the subprocess call, because it is not a usable wait time
+        if math.isinf(value):
+            return None
+
         return value
-
-    @model_validator(mode="after")
-    def validate_background_options(self) -> "ActionConfiguration":
-        """Validate that options which need a finished command are not combined with 'wait: false'.
-
-        Without waiting there is neither an exit code nor a point in time at which the timeout could apply.
-        Only explicitly configured options are rejected, not the defaults.
-
-        Returns:
-            The validated configuration.
-
-        Raises:
-            ValueError: If 'timeout' or 'success_exit_codes' is configured together with 'wait: false'.
-        """
-        if self.wait:
-            return self
-
-        conflicting_options = sorted(
-            {"timeout", "success_exit_codes"} & self.model_fields_set
-        )
-
-        if conflicting_options:
-            option_names = ", ".join(f"'{name}'" for name in conflicting_options)
-
-            raise ValueError(
-                f"{option_names} cannot be combined with 'wait: false' because the command is not waited for"
-            )
-
-        return self
 
     @field_validator("trusted_files", mode="before")
     @classmethod
@@ -557,6 +493,143 @@ class ActionConfiguration(BaseModel):
         return value
 
 
+class CommandConditionConfiguration(CommandConfiguration):
+    """Configuration for a command condition. The condition matches if the exit code and the configured outputs match."""
+
+
+class ConditionConfiguration(BaseModel):
+    """Configuration for a condition tree."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_by_name=True,
+    )
+
+    and_conditions: list["ConditionConfiguration"] | None = Field(
+        default=None,
+        validation_alias="and",
+        serialization_alias="and",
+    )
+    or_conditions: list["ConditionConfiguration"] | None = Field(
+        default=None,
+        validation_alias="or",
+        serialization_alias="or",
+    )
+    not_condition: "ConditionConfiguration | None" = Field(
+        default=None,
+        validation_alias="not",
+        serialization_alias="not",
+    )
+    process: ProcessConditionConfiguration | None = None
+    datetime: DateTimeConditionConfiguration | None = None
+    window: WindowConditionConfiguration | None = None
+    command: CommandConditionConfiguration | None = None
+
+    @model_validator(mode="after")
+    def validate_variant(self) -> "ConditionConfiguration":
+        configured_variants = sum(
+            value is not None
+            for value in (
+                self.and_conditions,
+                self.or_conditions,
+                self.not_condition,
+                self.process,
+                self.datetime,
+                self.window,
+                self.command,
+            )
+        )
+
+        if configured_variants != 1:
+            raise ValueError(
+                "A condition must define exactly one of 'and', 'or', 'not', 'process', 'datetime', 'window' or 'command'"
+            )
+
+        if self.and_conditions is not None and len(self.and_conditions) < 2:
+            raise ValueError("An 'and' condition must contain at least two conditions")
+
+        if self.or_conditions is not None and len(self.or_conditions) < 2:
+            raise ValueError("An 'or' condition must contain at least two conditions")
+
+        return self
+
+    def _get_child_conditions(self) -> tuple["ConditionConfiguration", ...]:
+        """Return the direct child conditions of a logical condition, or an empty tuple for any other condition."""
+        return (
+            *(self.and_conditions or ()),
+            *(self.or_conditions or ()),
+            *((self.not_condition,) if self.not_condition is not None else ()),
+        )
+
+    def get_trusted_files(self) -> tuple[Path, ...]:
+        """Return the trusted files of all command conditions of the condition tree.
+
+        Returns:
+            The configured paths in the order of the policy. Relative paths are not resolved
+            and duplicates are not removed, see "resolve_trusted_files()".
+        """
+        if self.command is not None:
+            return tuple(self.command.trusted_files)
+
+        return tuple(
+            file
+            for child in self._get_child_conditions()
+            for file in child.get_trusted_files()
+        )
+
+    def has_command_condition(self) -> bool:
+        """Return whether the condition tree contains a command condition.
+
+        Returns:
+            True if at least one command condition exists, otherwise False.
+        """
+        return self.command is not None or any(
+            child.has_command_condition() for child in self._get_child_conditions()
+        )
+
+
+class ActionConfiguration(CommandConfiguration):
+    """Configuration for an action which runs a command.
+
+    Unset optional values fall back to their defaults when the action is built.
+    For example, the default shell depends on the operating system.
+    """
+
+    name: str | None = None
+    wait: StrictBool = True
+    continue_on_error: StrictBool = False
+
+    @model_validator(mode="after")
+    def validate_background_options(self) -> "ActionConfiguration":
+        """Validate that options which need a finished command are not combined with 'wait: false'.
+
+        Without waiting there is neither an exit code, an output nor a point in time at which the timeout could apply.
+        Only explicitly configured options are rejected, not the defaults.
+
+        Returns:
+            The validated configuration.
+
+        Raises:
+            ValueError: If 'timeout', 'success_exit_codes', 'stdout' or 'stderr' is configured together with 'wait: false'.
+        """
+        if self.wait:
+            return self
+
+        conflicting_options = sorted(
+            {"timeout", "success_exit_codes", "stdout", "stderr"}
+            & self.model_fields_set
+        )
+
+        if conflicting_options:
+            option_names = ", ".join(f"'{name}'" for name in conflicting_options)
+
+            raise ValueError(
+                f"{option_names} cannot be combined with 'wait: false' because the command is not waited for"
+            )
+
+        return self
+
+
 class RuleConfiguration(BaseModel):
     """Configuration for a single rule."""
 
@@ -578,6 +651,8 @@ class RuleSetConfiguration(BaseModel):
     def get_trusted_files(self) -> tuple[Path, ...]:
         """Return the trusted files of all rules, including the disabled ones.
 
+        The files of the conditions of a rule come before the files of its actions.
+
         Returns:
             The configured paths in the order of the policy. Relative paths are not resolved
             and duplicates are not removed, see "resolve_trusted_files()".
@@ -585,9 +660,23 @@ class RuleSetConfiguration(BaseModel):
         return tuple(
             file
             for rule in self.rules
-            for action in rule.actions
-            for file in action.trusted_files
+            for file in (
+                *rule.conditions.get_trusted_files(),
+                *(
+                    action_file
+                    for action in rule.actions
+                    for action_file in action.trusted_files
+                ),
+            )
         )
+
+    def has_command_condition(self) -> bool:
+        """Return whether any rule, including the disabled ones, contains a command condition.
+
+        Returns:
+            True if at least one command condition exists, otherwise False.
+        """
+        return any(rule.conditions.has_command_condition() for rule in self.rules)
 
 
 def _parse_date(value: object) -> date:

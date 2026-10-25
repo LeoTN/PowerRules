@@ -126,6 +126,17 @@
                             "description": "Condition based on the presence of a window."
                         }
                     }
+                },
+                {
+                    "required": [
+                        "command"
+                    ],
+                    "properties": {
+                        "command": {
+                            "$ref": "#/$defs/commandCondition",
+                            "description": "Condition based on the result of a command."
+                        }
+                    }
                 }
             ],
             "unevaluatedProperties": false
@@ -308,10 +319,11 @@
                     "type": "string",
                     "enum": [
                         "exact",
-                        "regex"
+                        "regex",
+                        "contains"
                     ],
                     "default": "exact",
-                    "description": "Whether the match should be exact or use a regular expression."
+                    "description": "Whether the match should be exact, use a regular expression (full-string match, '.' also matches line breaks) or check whether the value contains the text."
                 },
                 "case_sensitive": {
                     "type": "boolean",
@@ -320,9 +332,27 @@
                 }
             }
         },
-        "action": {
+        "outputMatch": {
             "type": "object",
             "additionalProperties": false,
+            "description": "Expected output of a command. The output is compared after leading and trailing whitespace was removed.",
+            "required": [
+                "value"
+            ],
+            "properties": {
+                "value": {
+                    "type": "string",
+                    "description": "Text or regular expression the output is compared with."
+                },
+                "match": {
+                    "$ref": "#/$defs/match",
+                    "description": "Defines how the output should be matched."
+                }
+            }
+        },
+        "commandOptions": {
+            "type": "object",
+            "description": "Options which are shared by actions and command conditions.",
             "required": [
                 "run"
             ],
@@ -331,11 +361,6 @@
                     "type": "string",
                     "pattern": "\\S",
                     "description": "Command which is run in the configured shell."
-                },
-                "name": {
-                    "type": "string",
-                    "pattern": "\\S",
-                    "description": "Name of the action, used in log messages."
                 },
                 "shell": {
                     "type": "string",
@@ -374,7 +399,7 @@
                     ],
                     "exclusiveMinimum": 0,
                     "default": 60,
-                    "description": "Maximum run time in seconds. After that, the command including its child processes is terminated and the action counts as failed. Use null for no time limit. Cannot be combined with 'wait: false'."
+                    "description": "Maximum run time in seconds. After that, the command including its child processes is terminated and the action counts as failed (a command condition cannot be evaluated). Use null (or .inf) for no time limit. For actions, it cannot be combined with 'wait: false'."
                 },
                 "success_exit_codes": {
                     "type": "array",
@@ -382,10 +407,51 @@
                     "default": [
                         0
                     ],
-                    "description": "Exit codes which count as success. Cannot be combined with 'wait: false'.",
+                    "description": "Exit codes which count as success. For actions, it cannot be combined with 'wait: false'.",
                     "items": {
                         "type": "integer"
                     }
+                },
+                "stdout": {
+                    "$ref": "#/$defs/outputMatch",
+                    "description": "Expected standard output. For actions, it cannot be combined with 'wait: false'."
+                },
+                "stderr": {
+                    "$ref": "#/$defs/outputMatch",
+                    "description": "Expected error output. For actions, it cannot be combined with 'wait: false'."
+                },
+                "trusted_files": {
+                    "type": "array",
+                    "description": "Files (e.g. scripts) the command depends on. Relative paths are resolved against the directory of the policy file. Their digests are stored by 'trust add' and verified before every run of the command.",
+                    "items": {
+                        "type": "string",
+                        "pattern": "\\S"
+                    }
+                }
+            }
+        },
+        "commandCondition": {
+            "type": "object",
+            "description": "Runs a command. The condition is satisfied if the exit code is one of 'success_exit_codes' (default 0) and the configured 'stdout' and 'stderr' match. A command which does not match is no error, a command which cannot be started or exceeds the timeout is.",
+            "allOf": [
+                {
+                    "$ref": "#/$defs/commandOptions"
+                }
+            ],
+            "unevaluatedProperties": false
+        },
+        "action": {
+            "type": "object",
+            "allOf": [
+                {
+                    "$ref": "#/$defs/commandOptions"
+                }
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "pattern": "\\S",
+                    "description": "Name of the action, used in log messages."
                 },
                 "wait": {
                     "type": "boolean",
@@ -396,16 +462,9 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Whether the remaining actions of the rule are still executed if this action fails."
-                },
-                "trusted_files": {
-                    "type": "array",
-                    "description": "Files (e.g. scripts) the command depends on. Relative paths are resolved against the directory of the policy file. Their digests are stored by 'policy trust' and verified before every run of the action.",
-                    "items": {
-                        "type": "string",
-                        "pattern": "\\S"
-                    }
                 }
             },
+            "unevaluatedProperties": false,
             "if": {
                 "required": [
                     "wait"
@@ -427,6 +486,16 @@
                         {
                             "required": [
                                 "success_exit_codes"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "stdout"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "stderr"
                             ]
                         }
                     ]

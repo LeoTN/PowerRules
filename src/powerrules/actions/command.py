@@ -1,19 +1,13 @@
 import logging
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 
+from powerrules.commands.runner import CommandRunner, FilesVerifier
+from powerrules.conditions.matcher import StringMatcher
 from powerrules.engine.exceptions import ActionExecutionError
-from powerrules.providers.command import (
-    CommandProvider,
-    CommandRequest,
-    CommandResult,
-    Shell,
-)
+from powerrules.providers.command import CommandProvider, CommandResult, Shell
 
 logger = logging.getLogger(__name__)
-
-# Verifies the given trusted files right before a command runs and raises an error if they must not be used
-FilesVerifier = Callable[[Sequence[Path]], None]
 
 # Time in seconds a command may run before it is terminated
 DEFAULT_ACTION_TIMEOUT_SECONDS = 60
@@ -43,6 +37,8 @@ class CommandAction:
         continue_on_error: bool = False,
         trusted_files: Sequence[Path] = (),
         files_verifier: FilesVerifier | None = None,
+        stdout_matcher: StringMatcher | None = None,
+        stderr_matcher: StringMatcher | None = None,
     ):
         """Create an action which runs a command in a shell.
 
@@ -56,11 +52,13 @@ class CommandAction:
             environment: Additional environment variables for the command.
             timeout: Maximum run time in seconds, None for no time limit.
             success_exit_codes: Exit codes which count as success.
-            wait: Whether to wait for the command to finish. If False, the timeout and the exit codes are ignored.
+            wait: Whether to wait for the command to finish. If False, the timeout, the exit codes and the outputs are ignored.
             continue_on_error: Whether a failure is only logged instead of raised.
             trusted_files: Absolute paths of the files the command depends on, they are verified before every run.
             files_verifier: Called with the trusted files before every run, it raises an error if they must not be used.
                 None skips the verification.
+            stdout_matcher: Expectation for stdout. A different output counts as a failure. None accepts any output.
+            stderr_matcher: Expectation for stderr. A different output counts as a failure. None accepts any output.
         """
         self.command_provider = command_provider
         self.command = command
@@ -75,6 +73,27 @@ class CommandAction:
         self.continue_on_error = continue_on_error
         self.trusted_files = tuple(trusted_files)
         self.files_verifier = files_verifier
+        self.stdout_matcher = stdout_matcher
+        self.stderr_matcher = stderr_matcher
+        self.runner = CommandRunner(
+            command_provider=command_provider,
+            command=command,
+            working_directory=working_directory,
+            timeout=timeout,
+            shell=shell,
+            # The variables of PowerRules come last, the configuration cannot define them
+            environment={
+                **self.environment,
+                RULE_NAME_ENVIRONMENT_VARIABLE: rule_name,
+                ACTION_NAME_ENVIRONMENT_VARIABLE: name,
+            },
+            success_exit_codes=self.success_exit_codes,
+            wait=wait,
+            stdout_matcher=stdout_matcher,
+            stderr_matcher=stderr_matcher,
+            trusted_files=self.trusted_files,
+            files_verifier=files_verifier,
+        )
 
     def execute(self) -> None:
         """Run the command.
@@ -84,13 +103,9 @@ class CommandAction:
 
         Raises:
             FileIntegrityError: If trust is required and a trusted file cannot be read, is not trusted yet or was modified.
-            ActionExecutionError: If the command cannot be started, exceeds the timeout
-                or finishes with an exit code which does not count as success.
+            ActionExecutionError: If the command cannot be started, exceeds the timeout, finishes with an exit code
+                which does not count as success or produces an unexpected output.
         """
-        # Outside of the try block on purpose: "continue_on_error" must never skip a failed integrity check
-        if self.files_verifier is not None and self.trusted_files:
-            self.files_verifier(self.trusted_files)
-
         logger.info(f"Running action '{self.name}'")
         # The command is only logged on debug level, because it might contain secrets
         logger.debug(f"Command of action '{self.name}': {self.command.strip()}")
@@ -98,6 +113,7 @@ class CommandAction:
         try:
             self._run_command()
         except ActionExecutionError as e:
+            # A failed integrity check is no ActionExecutionError: "continue_on_error" must never skip it
             if not self.continue_on_error:
                 raise
 
@@ -109,26 +125,13 @@ class CommandAction:
         """Run the command and check its result.
 
         Raises:
-            ActionExecutionError: If the command cannot be started, exceeds the timeout
-                or finishes with an exit code which does not count as success.
+            FileIntegrityError: If trust is required and a trusted file cannot be read, is not trusted yet or was modified.
+            ActionExecutionError: If the command cannot be started, exceeds the timeout,
+                finishes with an exit code which does not count as success or produces an unexpected output.
         """
-        request = CommandRequest(
-            command=self.command,
-            working_directory=self.working_directory,
-            # The variables of PowerRules come last, the configuration cannot define them
-            environment={
-                **self.environment,
-                RULE_NAME_ENVIRONMENT_VARIABLE: self.rule_name,
-                ACTION_NAME_ENVIRONMENT_VARIABLE: self.name,
-            },
-            timeout=self.timeout,
-            wait=self.wait,
-            shell=self.shell,
-        )
-
         # TimeoutError is a subclass of OSError, so it has to be handled first
         try:
-            result = self.command_provider.run(request)
+            outcome = self.runner.run()
         except TimeoutError as e:
             raise ActionExecutionError(
                 f"Action '{self.name}' timed out after {self.timeout:g} seconds"
@@ -142,19 +145,30 @@ class CommandAction:
             logger.info(f"Started action '{self.name}' in the background")
             return
 
-        succeeded = result.exit_code in self.success_exit_codes
-        self._log_output(result, failed=not succeeded)
+        self._log_output(outcome.result, failed=not outcome.matched)
 
-        if not succeeded:
+        if not outcome.exit_code_matched:
             expected_exit_codes = ", ".join(
                 str(exit_code) for exit_code in sorted(self.success_exit_codes)
             )
 
             raise ActionExecutionError(
-                f"Action '{self.name}' returned exit code {result.exit_code}, expected one of: {expected_exit_codes}"
+                f"Action '{self.name}' returned exit code {outcome.result.exit_code}, expected one of: {expected_exit_codes}"
             )
 
-        logger.info(f"Action '{self.name}' finished with exit code {result.exit_code}")
+        # The message names only the stream, the output itself might contain secrets
+        for stream, is_matched in (
+            ("stdout", outcome.stdout_matched),
+            ("stderr", outcome.stderr_matched),
+        ):
+            if not is_matched:
+                raise ActionExecutionError(
+                    f"Action '{self.name}' produced an unexpected output on {stream}"
+                )
+
+        logger.info(
+            f"Action '{self.name}' finished with exit code {outcome.result.exit_code}"
+        )
 
     def _log_output(self, result: CommandResult, failed: bool) -> None:
         """Log the output of the command.

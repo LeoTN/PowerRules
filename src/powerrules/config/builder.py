@@ -1,18 +1,23 @@
+from collections.abc import Sequence
 from datetime import datetime, time
 from pathlib import Path
 
 from powerrules.actions.command import CommandAction, FilesVerifier
 from powerrules.conditions.base import Condition
+from powerrules.conditions.command import CommandCondition
 from powerrules.conditions.datetime import DateTimeCondition, DateTimeRange, TimeRange
+from powerrules.conditions.matcher import StringMatcher
 from powerrules.conditions.operators import AndCondition, NotCondition, OrCondition
 from powerrules.conditions.process import ProcessCondition
 from powerrules.conditions.window import WindowCondition
 from powerrules.config.models import (
     ActionConfiguration,
+    CommandConditionConfiguration,
     ConditionConfiguration,
     DateRangeConfiguration,
     DateTimeConditionConfiguration,
     DateTimeRangeConfiguration,
+    OutputMatchConfiguration,
     ProcessConditionConfiguration,
     RuleConfiguration,
     RuleSetConfiguration,
@@ -36,17 +41,20 @@ class ConfigurationBuilder:
         window_provider: WindowProvider,
         base_directory: Path,
         files_verifier: FilesVerifier | None = None,
+        condition_files_verifier: FilesVerifier | None = None,
     ):
         """Create a builder for the rules of one policy.
 
         Args:
             clock_provider: Provider for the current date and time.
             process_provider: Provider for the existing processes.
-            command_provider: Provider which runs the commands of the actions.
+            command_provider: Provider which runs the commands of the actions and the command conditions.
             window_provider: Provider for the existing windows.
             base_directory: Directory of the policy file. Commands run there by default,
-                and relative working directories of actions are resolved against it.
+                and relative working directories of actions and conditions are resolved against it.
             files_verifier: Called with the trusted files before an action runs. None skips the verification.
+            condition_files_verifier: Called with the trusted files before a command condition runs.
+                None skips the verification.
         """
         self.clock_provider = clock_provider
         self.process_provider = process_provider
@@ -54,6 +62,7 @@ class ConfigurationBuilder:
         self.window_provider = window_provider
         self.base_directory = base_directory
         self.files_verifier = files_verifier
+        self.condition_files_verifier = condition_files_verifier
 
     def build(self, configuration: RuleSetConfiguration) -> RuleSet:
         """Build a rule set from the validated configuration. This allows the rule engine to process the rules.
@@ -142,6 +151,9 @@ class ConfigurationBuilder:
 
         if condition_configuration.window is not None:
             return self._build_window_condition(condition_configuration.window)
+
+        if condition_configuration.command is not None:
+            return self._build_command_condition(condition_configuration.command)
 
         raise ConfigurationError("Condition configuration does not contain a condition")
 
@@ -234,6 +246,34 @@ class ConfigurationBuilder:
             case_sensitive=configuration.match.case_sensitive,
         )
 
+    def _build_command_condition(
+        self,
+        configuration: CommandConditionConfiguration,
+    ) -> CommandCondition:
+        """Build a command condition from its configuration.
+
+        Args:
+            configuration: Command condition configuration.
+
+        Returns:
+            The executable command condition.
+        """
+        return CommandCondition(
+            command_provider=self.command_provider,
+            command=configuration.run,
+            working_directory=self._resolve_working_directory(
+                configuration.working_directory
+            ),
+            timeout=configuration.timeout,
+            shell=configuration.shell,
+            environment=configuration.env,
+            success_exit_codes=configuration.success_exit_codes,
+            stdout_matcher=self._build_output_matcher(configuration.stdout),
+            stderr_matcher=self._build_output_matcher(configuration.stderr),
+            trusted_files=self._resolve_trusted_files(configuration.trusted_files),
+            files_verifier=self.condition_files_verifier,
+        )
+
     def _build_action(
         self,
         configuration: ActionConfiguration,
@@ -252,17 +292,12 @@ class ConfigurationBuilder:
         Returns:
             The executable action.
         """
-        # An absolute working directory replaces the base directory when the paths are joined
-        working_directory = (
-            self.base_directory / configuration.working_directory
-            if configuration.working_directory is not None
-            else self.base_directory
-        )
-
         return CommandAction(
             command_provider=self.command_provider,
             command=configuration.run,
-            working_directory=working_directory,
+            working_directory=self._resolve_working_directory(
+                configuration.working_directory
+            ),
             name=(
                 configuration.name
                 if configuration.name is not None
@@ -275,9 +310,55 @@ class ConfigurationBuilder:
             success_exit_codes=configuration.success_exit_codes,
             wait=configuration.wait,
             continue_on_error=configuration.continue_on_error,
-            # Not resolved here, the verifier resolves symbolic links on every check
-            trusted_files=tuple(
-                self.base_directory / file for file in configuration.trusted_files
-            ),
+            trusted_files=self._resolve_trusted_files(configuration.trusted_files),
             files_verifier=self.files_verifier,
+            stdout_matcher=self._build_output_matcher(configuration.stdout),
+            stderr_matcher=self._build_output_matcher(configuration.stderr),
+        )
+
+    def _resolve_working_directory(self, working_directory: Path | None) -> Path:
+        """Resolve the configured working directory of a command.
+
+        Args:
+            working_directory: Configured working directory, or None if not configured.
+
+        Returns:
+            The base directory if nothing is configured, otherwise the configured directory.
+            An absolute working directory replaces the base directory when the paths are joined.
+        """
+        if working_directory is None:
+            return self.base_directory
+
+        return self.base_directory / working_directory
+
+    def _resolve_trusted_files(self, trusted_files: Sequence[Path]) -> tuple[Path, ...]:
+        """Resolve the configured trusted files of a command against the base directory.
+
+        Args:
+            trusted_files: Configured trusted files.
+
+        Returns:
+            The joined paths. They are not resolved here, the verifier resolves symbolic links on every check.
+        """
+        return tuple(self.base_directory / file for file in trusted_files)
+
+    @staticmethod
+    def _build_output_matcher(
+        configuration: OutputMatchConfiguration | None,
+    ) -> StringMatcher | None:
+        """Build the matcher for the expected output of a command.
+
+        Args:
+            configuration: Configuration of the expected output, or None if any output is accepted.
+
+        Returns:
+            The matcher, or None if no output is expected.
+        """
+        if configuration is None:
+            return None
+
+        return StringMatcher(
+            pattern=configuration.value,
+            match_type=configuration.match.type,
+            case_sensitive=configuration.match.case_sensitive,
         )
