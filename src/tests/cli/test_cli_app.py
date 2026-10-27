@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 from typer.testing import CliRunner
 
+from powerrules.application.runtime import DEFAULT_EVALUATION_INTERVAL_SECONDS
 from powerrules.cli.app import app
 from powerrules.cli.errors import EXIT_POLICY_ERROR, EXIT_RUNTIME_ERROR
 from powerrules.engine.exceptions import ActionExecutionError, ConditionEvaluationError
@@ -298,6 +299,7 @@ def test_cli_policy_run_calls_run_continuously(runtime: Mock) -> None:
     assert result.exit_code == 0
     runtime.run_continuously.assert_called_once_with(
         configuration_path=Path("powerrules.yaml"),
+        evaluation_interval=DEFAULT_EVALUATION_INTERVAL_SECONDS,
         stop_on_match=False,
         dry_run=False,
     )
@@ -313,6 +315,7 @@ def test_cli_policy_run_uses_custom_policy_path(runtime: Mock, tmp_path: Path) -
     assert result.exit_code == 0
     runtime.run_continuously.assert_called_once_with(
         configuration_path=policy_file,
+        evaluation_interval=DEFAULT_EVALUATION_INTERVAL_SECONDS,
         stop_on_match=False,
         dry_run=False,
     )
@@ -326,6 +329,7 @@ def test_cli_policy_run_passes_stop_on_match(runtime: Mock) -> None:
     assert result.exit_code == 0
     runtime.run_continuously.assert_called_once_with(
         configuration_path=Path("powerrules.yaml"),
+        evaluation_interval=DEFAULT_EVALUATION_INTERVAL_SECONDS,
         stop_on_match=True,
         dry_run=False,
     )
@@ -344,6 +348,7 @@ def test_cli_policy_run_passes_custom_policy_and_stop_on_match(
     assert result.exit_code == 0
     runtime.run_continuously.assert_called_once_with(
         configuration_path=policy_file,
+        evaluation_interval=DEFAULT_EVALUATION_INTERVAL_SECONDS,
         stop_on_match=True,
         dry_run=False,
     )
@@ -386,6 +391,7 @@ def test_cli_policy_run_logs_dry_run_match(runtime: Mock) -> None:
     )
     runtime.run_continuously.assert_called_once_with(
         configuration_path=Path("powerrules.yaml"),
+        evaluation_interval=DEFAULT_EVALUATION_INTERVAL_SECONDS,
         stop_on_match=True,
         dry_run=True,
     )
@@ -477,3 +483,34 @@ def test_cli_policy_run_reports_runtime_errors(
 
     assert result.exit_code == EXIT_RUNTIME_ERROR
     assert message in get_plain_output(result, "output")
+
+
+@pytest.mark.parametrize("interval", ["0.5", "2", "3600"])
+def test_cli_policy_run_passes_interval(runtime: Mock, interval: str) -> None:
+    runtime.run_continuously.return_value = iter([])
+
+    result = runner.invoke(app, ["policy", "run", "--interval", interval])
+
+    assert result.exit_code == 0
+    assert runtime.run_continuously.call_args.kwargs["evaluation_interval"] == float(
+        interval
+    )
+
+
+# The exit code 2 is the one of an invalid usage. The text of the error is wrapped by the formatting of the error panel,
+# so only the name of the option is checked
+@pytest.mark.parametrize("interval", ["0", "-1", "nan", "inf", "1e300", "abc"])
+def test_cli_policy_run_rejects_invalid_interval(runtime: Mock, interval: str) -> None:
+    result = runner.invoke(app, ["policy", "run", f"--interval={interval}"])
+
+    assert result.exit_code == EXIT_POLICY_ERROR
+    assert "--interval" in get_plain_output(result, "output")
+    runtime.run_continuously.assert_not_called()
+
+
+# The interval has no effect with "--once", but an invalid one is still a mistake
+def test_cli_policy_run_validates_interval_together_with_once(runtime: Mock) -> None:
+    result = runner.invoke(app, ["policy", "run", "--once", "--interval", "0"])
+
+    assert result.exit_code == EXIT_POLICY_ERROR
+    runtime.run_once.assert_not_called()

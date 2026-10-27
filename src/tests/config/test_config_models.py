@@ -6,11 +6,15 @@ from pydantic import BaseModel, ValidationError
 
 from powerrules.actions.command import DEFAULT_ACTION_TIMEOUT_SECONDS
 from powerrules.conditions.datetime import Month, Weekday
+from powerrules.conditions.matcher import MatchType
 from powerrules.config.models import (
     ActionConfiguration,
+    CommandConditionConfiguration,
+    ConditionConfiguration,
     DateRangeConfiguration,
     DateTimeConditionConfiguration,
     DateTimeRangeConfiguration,
+    OutputMatchConfiguration,
     RuleConfiguration,
     RuleSetConfiguration,
     TimeRangeConfiguration,
@@ -378,7 +382,7 @@ def test_action_configuration_accepts_timeout(timeout: float | None) -> None:
     assert make_action_configuration(timeout=timeout).timeout == timeout
 
 
-@pytest.mark.parametrize("timeout", [0, -1, -0.5, float("nan")])
+@pytest.mark.parametrize("timeout", [0, -1, -0.5, float("nan"), float("-inf")])
 def test_action_configuration_rejects_non_positive_timeout(timeout: float) -> None:
     with pytest.raises(ValidationError, match="'timeout' must be greater than zero"):
         make_action_configuration(timeout=timeout)
@@ -455,8 +459,25 @@ def test_action_configuration_accepts_waiting_action_with_all_waiting_options() 
             "'success_exit_codes' cannot be combined with 'wait: false'",
         ),
         (
+            {"stdout": {"value": "ok"}},
+            "'stdout' cannot be combined with 'wait: false'",
+        ),
+        (
+            {"stderr": {"value": "ok"}},
+            "'stderr' cannot be combined with 'wait: false'",
+        ),
+        (
             {"timeout": 5, "success_exit_codes": [0]},
             "'success_exit_codes', 'timeout' cannot be combined with 'wait: false'",
+        ),
+        (
+            {
+                "timeout": 5,
+                "success_exit_codes": [0],
+                "stdout": {"value": "ok"},
+                "stderr": {"value": "ok"},
+            },
+            "'stderr', 'stdout', 'success_exit_codes', 'timeout' cannot be combined with 'wait: false'",
         ),
     ],
 )
@@ -1176,3 +1197,342 @@ def test_rule_set_without_trusted_files_returns_empty_tuple() -> None:
     )
 
     assert configuration.get_trusted_files() == ()
+
+
+##########################
+# Output expectation tests
+##########################
+
+
+def test_output_match_configuration_matches_exactly_and_case_sensitive_by_default() -> (
+    None
+):
+    output = OutputMatchConfiguration.model_validate({"value": "active"})
+
+    assert output.value == "active"
+    assert output.match.type is MatchType.EXACT
+    assert output.match.case_sensitive is True
+
+
+def test_output_match_configuration_accepts_match_options() -> None:
+    output = OutputMatchConfiguration.model_validate(
+        {"value": ".*error.*", "match": {"type": "regex", "case_sensitive": False}}
+    )
+
+    assert output.match.type is MatchType.REGEX
+    assert output.match.case_sensitive is False
+
+
+def test_output_match_configuration_accepts_contains_match() -> None:
+    output = OutputMatchConfiguration.model_validate(
+        {"value": "active", "match": {"type": "contains"}}
+    )
+
+    assert output.match.type is MatchType.CONTAINS
+
+
+# An empty text is valid: It matches an output which is empty after it was stripped
+def test_output_match_configuration_accepts_empty_value() -> None:
+    assert OutputMatchConfiguration.model_validate({"value": ""}).value == ""
+
+
+def test_output_match_configuration_requires_value() -> None:
+    with pytest.raises(ValidationError, match="Field required"):
+        OutputMatchConfiguration.model_validate({"match": {"type": "regex"}})
+
+
+@pytest.mark.parametrize("value", [5, None, ["a"]])
+def test_output_match_configuration_rejects_non_string_value(value: object) -> None:
+    with pytest.raises(ValidationError, match="valid string"):
+        OutputMatchConfiguration.model_validate({"value": value})
+
+
+def test_output_match_configuration_rejects_unknown_field() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        OutputMatchConfiguration.model_validate({"value": "ok", "unknown": True})
+
+
+def test_action_configuration_accepts_output_expectations() -> None:
+    action = make_action_configuration(
+        stdout={"value": "active", "match": {"type": "contains"}},
+        stderr={"value": ""},
+    )
+
+    assert action.stdout is not None
+    assert action.stdout.match.type is MatchType.CONTAINS
+    assert action.stderr is not None
+    assert action.stderr.value == ""
+
+
+def test_action_configuration_has_no_output_expectations_by_default() -> None:
+    action = make_action_configuration()
+
+    assert action.stdout is None
+    assert action.stderr is None
+
+
+#####################################
+# CommandConditionConfiguration tests
+#####################################
+
+
+def test_command_condition_configuration_uses_defaults() -> None:
+    command = CommandConditionConfiguration.model_validate({"run": "echo test"})
+
+    assert command.run == "echo test"
+    assert command.shell is None
+    assert command.working_directory is None
+    assert command.env == {}
+    assert command.timeout == DEFAULT_ACTION_TIMEOUT_SECONDS
+    assert command.success_exit_codes == [0]
+    assert command.stdout is None
+    assert command.stderr is None
+    assert command.trusted_files == []
+
+
+def test_command_condition_configuration_accepts_all_options() -> None:
+    command = CommandConditionConfiguration.model_validate(
+        {
+            "run": "systemctl is-active nginx",
+            "shell": "bash",
+            "working_directory": "scripts",
+            "env": {"RETRIES": 3},
+            "timeout": 5,
+            "success_exit_codes": [0, 3],
+            "stdout": {"value": "active", "match": {"type": "contains"}},
+            "stderr": {"value": ".*error.*", "match": {"type": "regex"}},
+            "trusted_files": ["scripts/check.sh"],
+        }
+    )
+
+    assert command.shell is Shell.BASH
+    assert command.working_directory == Path("scripts")
+    assert command.env == {"RETRIES": "3"}
+    assert command.timeout == 5
+    assert command.success_exit_codes == [0, 3]
+    assert command.stdout is not None
+    assert command.stdout.value == "active"
+    assert command.stderr is not None
+    assert command.stderr.match.type is MatchType.REGEX
+    assert command.trusted_files == [Path("scripts/check.sh")]
+
+
+def test_command_condition_configuration_requires_run() -> None:
+    with pytest.raises(ValidationError, match="Field required"):
+        CommandConditionConfiguration.model_validate({})
+
+
+@pytest.mark.parametrize("value", ["", " ", "\n\t"])
+def test_command_condition_configuration_rejects_blank_run(value: str) -> None:
+    with pytest.raises(ValidationError, match="The 'run' value must not be blank"):
+        CommandConditionConfiguration.model_validate({"run": value})
+
+
+# A condition has no name, does not run in the background and has nothing to continue after an error
+@pytest.mark.parametrize(
+    "option",
+    [
+        {"name": "Check"},
+        {"wait": False},
+        {"continue_on_error": True},
+    ],
+)
+def test_command_condition_configuration_rejects_action_only_options(
+    option: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        CommandConditionConfiguration.model_validate({"run": "echo test", **option})
+
+
+@pytest.mark.parametrize(
+    ("option", "message"),
+    [
+        ({"env": {"POWERRULES_CUSTOM": "value"}}, "is reserved"),
+        ({"env": {"A=B": "value"}}, "Invalid environment variable name"),
+        ({"working_directory": " "}, "must not be blank"),
+        ({"timeout": 0}, "'timeout' must be greater than zero"),
+        ({"success_exit_codes": []}, "at least 1 item"),
+        ({"trusted_files": [" "]}, "'trusted_files' entries must not be blank"),
+    ],
+)
+def test_command_condition_configuration_validates_shared_options(
+    option: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        CommandConditionConfiguration.model_validate({"run": "echo test", **option})
+
+
+# YAML ".inf" is a float which cannot be passed on as a wait time, so it means "no time limit"
+def test_timeout_infinity_is_normalized_to_no_time_limit() -> None:
+    action = make_action_configuration(timeout=float("inf"))
+    command = CommandConditionConfiguration.model_validate(
+        {"run": "echo test", "timeout": float("inf")}
+    )
+
+    assert action.timeout is None
+    assert command.timeout is None
+
+
+#################################
+# Command condition variant tests
+#################################
+
+
+def test_condition_configuration_accepts_command_condition() -> None:
+    condition = ConditionConfiguration.model_validate({"command": {"run": "echo test"}})
+
+    assert condition.command is not None
+    assert condition.command.run == "echo test"
+
+
+def test_condition_configuration_rejects_command_combined_with_other_variant() -> None:
+    with pytest.raises(ValidationError, match="must define exactly one of"):
+        ConditionConfiguration.model_validate(
+            {
+                "command": {"run": "echo test"},
+                "process": {"name": "backup.exe", "exists": False},
+            }
+        )
+
+
+def test_condition_configuration_names_command_as_variant_in_error() -> None:
+    with pytest.raises(ValidationError, match="or 'command'"):
+        ConditionConfiguration.model_validate({})
+
+
+def test_condition_configuration_rejects_unknown_command_field() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ConditionConfiguration.model_validate(
+            {"command": {"run": "echo test", "unknown": True}}
+        )
+
+
+def test_condition_configuration_returns_trusted_files_of_nested_command_conditions() -> (
+    None
+):
+    condition = ConditionConfiguration.model_validate(
+        {
+            "and": [
+                {"command": {"run": "a", "trusted_files": ["a.sh", "b.sh"]}},
+                {
+                    "or": [
+                        {"not": {"command": {"run": "c", "trusted_files": ["c.sh"]}}},
+                        {"process": {"name": "backup.exe", "exists": False}},
+                    ]
+                },
+            ]
+        }
+    )
+
+    # Duplicates are not removed here, see "resolve_trusted_files()"
+    assert condition.get_trusted_files() == (Path("a.sh"), Path("b.sh"), Path("c.sh"))
+
+
+def test_condition_configuration_without_command_condition_has_no_trusted_files() -> (
+    None
+):
+    condition = ConditionConfiguration.model_validate(
+        {"process": {"name": "backup.exe", "exists": False}}
+    )
+
+    assert condition.get_trusted_files() == ()
+
+
+PROCESS_CONDITION_DATA = {"process": {"name": "backup.exe", "exists": False}}
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"command": {"run": "a"}}, True),
+        (PROCESS_CONDITION_DATA, False),
+        ({"not": {"command": {"run": "a"}}}, True),
+        (
+            {
+                "and": [
+                    PROCESS_CONDITION_DATA,
+                    {
+                        "or": [
+                            {"datetime": {"weekday": ["Monday"]}},
+                            {"command": {"run": "a"}},
+                        ]
+                    },
+                ]
+            },
+            True,
+        ),
+        (
+            {
+                "and": [
+                    PROCESS_CONDITION_DATA,
+                    {"window": {"title": "Firefox", "exists": True}},
+                ]
+            },
+            False,
+        ),
+    ],
+)
+def test_condition_configuration_detects_command_conditions(
+    data: dict[str, object],
+    expected: bool,
+) -> None:
+    assert ConditionConfiguration.model_validate(data).has_command_condition() is (
+        expected
+    )
+
+
+def test_rule_set_returns_trusted_files_of_conditions_before_those_of_actions() -> None:
+    configuration = RuleSetConfiguration.model_validate(
+        {
+            "rules": [
+                make_rule_data(
+                    name="First",
+                    conditions={
+                        "command": {"run": "check", "trusted_files": ["c1.sh"]}
+                    },
+                    actions=[{"run": "echo test", "trusted_files": ["a1.sh"]}],
+                ),
+                make_rule_data(
+                    name="Disabled",
+                    enabled=False,
+                    conditions={
+                        "command": {"run": "check", "trusted_files": ["c2.sh"]}
+                    },
+                    actions=[{"run": "echo test", "trusted_files": ["a2.sh"]}],
+                ),
+            ]
+        }
+    )
+
+    assert configuration.get_trusted_files() == (
+        Path("c1.sh"),
+        Path("a1.sh"),
+        Path("c2.sh"),
+        Path("a2.sh"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("rules", "expected"),
+    [
+        ([], False),
+        ([make_rule_data()], False),
+        ([make_rule_data(conditions={"command": {"run": "check"}})], True),
+        # Disabled rules count as well, their files are trusted too
+        (
+            [
+                make_rule_data(),
+                make_rule_data(enabled=False, conditions={"command": {"run": "check"}}),
+            ],
+            True,
+        ),
+    ],
+)
+def test_rule_set_detects_command_conditions(
+    rules: list[dict[str, object]],
+    expected: bool,
+) -> None:
+    configuration = RuleSetConfiguration.model_validate({"rules": rules})
+
+    assert configuration.has_command_condition() is expected

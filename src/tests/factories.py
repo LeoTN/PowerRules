@@ -3,7 +3,7 @@
 Plain helper functions are defined in "tests.helpers", fixtures in the "conftest.py" files.
 """
 
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, create_autospec
@@ -18,12 +18,16 @@ from powerrules.actions.command import (
 )
 from powerrules.application.runtime import PlatformProviders, PowerRulesRuntime
 from powerrules.application.trust import trust_policy
+from powerrules.commands.runner import CommandRunner
 from powerrules.conditions.base import Condition
+from powerrules.conditions.command import CommandCondition
 from powerrules.conditions.datetime import DateTimeCondition, Month, Weekday
+from powerrules.conditions.matcher import StringMatcher
 from powerrules.config.builder import ConfigurationBuilder
 from powerrules.config.loader import ConfigurationLoader
 from powerrules.config.models import (
     ActionConfiguration,
+    CommandConditionConfiguration,
     ConditionConfiguration,
     DateRangeConfiguration,
     DateTimeConditionConfiguration,
@@ -146,6 +150,8 @@ def make_command_action(
     continue_on_error: bool = False,
     trusted_files: Sequence[Path] = (),
     files_verifier: FilesVerifier | None = None,
+    stdout_matcher: StringMatcher | None = None,
+    stderr_matcher: StringMatcher | None = None,
 ) -> CommandAction:
     """Create a real command action with fixed names and the given options.
 
@@ -163,6 +169,8 @@ def make_command_action(
         continue_on_error: Whether a failure is only logged instead of raised.
         trusted_files: Files the command depends on.
         files_verifier: Verifier which is called with the trusted files. None skips the verification.
+        stdout_matcher: Expectation for stdout. None accepts any output.
+        stderr_matcher: Expectation for stderr. None accepts any output.
 
     Returns:
         The action.
@@ -179,6 +187,105 @@ def make_command_action(
         success_exit_codes=success_exit_codes,
         wait=wait,
         continue_on_error=continue_on_error,
+        trusted_files=trusted_files,
+        files_verifier=files_verifier,
+        stdout_matcher=stdout_matcher,
+        stderr_matcher=stderr_matcher,
+    )
+
+
+def make_command_runner(
+    command_provider: CommandProvider | None = None,
+    *,
+    command: str = "echo test",
+    working_directory: Path = DEFAULT_WORKING_DIRECTORY,
+    timeout: float | None = DEFAULT_ACTION_TIMEOUT_SECONDS,
+    shell: Shell | None = None,
+    environment: Mapping[str, str] | None = None,
+    success_exit_codes: Collection[int] = (0,),
+    wait: bool = True,
+    stdout_matcher: StringMatcher | None = None,
+    stderr_matcher: StringMatcher | None = None,
+    trusted_files: Sequence[Path] = (),
+    files_verifier: FilesVerifier | None = None,
+) -> CommandRunner:
+    """Create a real command runner with the given options.
+
+    Args:
+        command_provider: Provider which runs the command. Defaults to a mocked one.
+        command: Command to run.
+        working_directory: Directory the command is run in.
+        timeout: Maximum run time in seconds, None for no time limit.
+        shell: Shell to run the command with.
+        environment: Additional environment variables for the command.
+        success_exit_codes: Exit codes which count as success.
+        wait: Whether to wait for the command to finish.
+        stdout_matcher: Expectation for stdout. None accepts any output.
+        stderr_matcher: Expectation for stderr. None accepts any output.
+        trusted_files: Files the command depends on.
+        files_verifier: Verifier which is called with the trusted files. None skips the verification.
+
+    Returns:
+        The runner.
+    """
+    return CommandRunner(
+        command_provider if command_provider is not None else make_command_provider(),
+        command,
+        working_directory,
+        timeout=timeout,
+        shell=shell,
+        environment=environment,
+        success_exit_codes=success_exit_codes,
+        wait=wait,
+        stdout_matcher=stdout_matcher,
+        stderr_matcher=stderr_matcher,
+        trusted_files=trusted_files,
+        files_verifier=files_verifier,
+    )
+
+
+def make_command_condition(
+    command_provider: CommandProvider | None = None,
+    *,
+    command: str = "echo test",
+    working_directory: Path = DEFAULT_WORKING_DIRECTORY,
+    timeout: float | None = DEFAULT_ACTION_TIMEOUT_SECONDS,
+    shell: Shell | None = None,
+    environment: Mapping[str, str] | None = None,
+    success_exit_codes: Collection[int] = (0,),
+    stdout_matcher: StringMatcher | None = None,
+    stderr_matcher: StringMatcher | None = None,
+    trusted_files: Sequence[Path] = (),
+    files_verifier: FilesVerifier | None = None,
+) -> CommandCondition:
+    """Create a real command condition with the given options.
+
+    Args:
+        command_provider: Provider which runs the command. Defaults to a mocked one.
+        command: Command to run.
+        working_directory: Directory the command is run in.
+        timeout: Maximum run time in seconds, None for no time limit.
+        shell: Shell to run the command with.
+        environment: Additional environment variables for the command.
+        success_exit_codes: Exit codes which count as success.
+        stdout_matcher: Expectation for stdout. None accepts any output.
+        stderr_matcher: Expectation for stderr. None accepts any output.
+        trusted_files: Files the command depends on.
+        files_verifier: Verifier which is called with the trusted files. None skips the verification.
+
+    Returns:
+        The condition.
+    """
+    return CommandCondition(
+        command_provider if command_provider is not None else make_command_provider(),
+        command,
+        working_directory,
+        timeout=timeout,
+        shell=shell,
+        environment=environment,
+        success_exit_codes=success_exit_codes,
+        stdout_matcher=stdout_matcher,
+        stderr_matcher=stderr_matcher,
         trusted_files=trusted_files,
         files_verifier=files_verifier,
     )
@@ -674,6 +781,25 @@ def make_datetime_condition_configuration(
     )
 
 
+def make_command_condition_configuration(**fields: object) -> ConditionConfiguration:
+    """Create the configuration of a command condition which consists of a command and the given fields.
+
+    Args:
+        **fields: Raw fields which are added to the command or replace it.
+
+    Returns:
+        The configuration.
+
+    Raises:
+        ValidationError: If the fields are invalid.
+    """
+    return ConditionConfiguration(
+        command=CommandConditionConfiguration.model_validate(
+            {"run": "echo test", **fields}
+        )
+    )
+
+
 def make_rule_configuration(
     name: str = "Test rule",
     *,
@@ -714,6 +840,7 @@ def make_configuration_builder(
     command_provider: CommandProvider | None = None,
     base_directory: Path = DEFAULT_BASE_DIRECTORY,
     files_verifier: FilesVerifier | None = None,
+    condition_files_verifier: FilesVerifier | None = None,
 ) -> ConfigurationBuilder:
     """Create a configuration builder. Providers which are not given are replaced by mocks.
 
@@ -723,7 +850,8 @@ def make_configuration_builder(
         window_provider: Provider for the windows. Defaults to a mocked one without windows.
         command_provider: Provider which runs the commands. Defaults to a mocked one.
         base_directory: Directory of the policy.
-        files_verifier: Verifier for the trusted files. None skips the verification.
+        files_verifier: Verifier for the trusted files of actions. None skips the verification.
+        condition_files_verifier: Verifier for the trusted files of command conditions. None skips the verification.
 
     Returns:
         The builder.
@@ -749,6 +877,7 @@ def make_configuration_builder(
         ),
         base_directory=base_directory,
         files_verifier=files_verifier,
+        condition_files_verifier=condition_files_verifier,
     )
 
 
@@ -831,6 +960,32 @@ def build_datetime_condition(
     return rule.condition
 
 
+def build_command_condition(
+    conditions: ConditionConfiguration | None = None,
+    *,
+    builder: ConfigurationBuilder | None = None,
+) -> CommandCondition:
+    """Build a rule with a single command condition configuration and return its command condition.
+
+    Args:
+        conditions: Condition configuration. Defaults to a command condition.
+        builder: Builder which builds the rule. Defaults to a builder with mocked providers.
+
+    Returns:
+        The built command condition.
+    """
+    rule = build_rule(
+        conditions
+        if conditions is not None
+        else make_command_condition_configuration(),
+        builder=builder,
+    )
+
+    assert isinstance(rule.condition, CommandCondition)
+
+    return rule.condition
+
+
 def build_rule_engine_from_policy(
     directory: Path,
     policy: str,
@@ -874,14 +1029,16 @@ def build_trusted_rule_engine(
     trust_store: TrustStore,
     policy: Path,
     *,
-    require_trust: bool = True,
+    require_trust_for_actions: bool = True,
+    require_trust_for_conditions: bool = True,
 ) -> RuleEngine:
     """Build the engine of a policy with the real runtime and a trust checker.
 
     Args:
         trust_store: Store which knows the trusted policies.
         policy: Path of the policy file.
-        require_trust: Whether a policy or file which is not trusted is rejected.
+        require_trust_for_actions: Whether a policy or file which is not trusted is rejected because of its actions.
+        require_trust_for_conditions: Whether a policy with a command condition which is not trusted is rejected.
 
     Returns:
         The rule engine.
@@ -890,7 +1047,11 @@ def build_trusted_rule_engine(
         PolicyNotTrustedError: If trust is required and the policy or a trusted file is not trusted.
     """
     runtime = PowerRulesRuntime(
-        trust_checker=PolicyTrustChecker(trust_store, require_trust=require_trust)
+        trust_checker=PolicyTrustChecker(
+            trust_store,
+            require_trust_for_actions=require_trust_for_actions,
+            require_trust_for_conditions=require_trust_for_conditions,
+        )
     )
 
     return runtime._build_rule_engine(policy)
@@ -944,6 +1105,18 @@ def make_policy_yaml(
 BACKUP_SCRIPT_POLICY = make_policy_yaml(
     action_name="Backup", trusted_files=[BACKUP_SCRIPT_RELATIVE_PATH]
 )
+# A valid policy whose condition runs a command which depends on the script "backup.sh"
+COMMAND_CONDITION_POLICY = f"""
+rules:
+  - name: "Test rule"
+    conditions:
+      command:
+        run: "check"
+        trusted_files:
+          - {BACKUP_SCRIPT_RELATIVE_PATH}
+    actions:
+      - run: "echo test"
+"""
 
 
 def make_rule_data(**overrides: object) -> dict[str, object]:
@@ -1009,6 +1182,28 @@ def write_backup_script_policy(
     return policy_file
 
 
+def write_command_condition_policy(
+    directory: Path,
+    *,
+    create_script: bool = True,
+) -> Path:
+    """Write "COMMAND_CONDITION_POLICY" and, optionally, the scripts which it trusts, into a directory.
+
+    Args:
+        directory: Directory of the policy and the scripts. It is created if it does not exist.
+        create_script: Whether the trusted scripts are written as well.
+
+    Returns:
+        The path of the policy file.
+    """
+    policy_file = write_policy(directory, COMMAND_CONDITION_POLICY)
+
+    if create_script:
+        write_workspace_scripts(directory)
+
+    return policy_file
+
+
 ###############
 # Other objects
 ###############
@@ -1033,3 +1228,24 @@ def make_validation_error() -> ValidationError:
         return error
 
     raise AssertionError("The validation was expected to fail")
+
+
+def make_monotonic_clock(*values: float) -> Callable[[], float]:
+    """Create a replacement for "time.monotonic()" which returns the given values one after another.
+
+    Args:
+        *values: Values which are returned by the consecutive calls.
+            The last value is returned again for every further call.
+
+    Returns:
+        The clock function.
+    """
+    remaining_values = list(values)
+
+    def monotonic() -> float:
+        if len(remaining_values) > 1:
+            return remaining_values.pop(0)
+
+        return remaining_values[0]
+
+    return monotonic

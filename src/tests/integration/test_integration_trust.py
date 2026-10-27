@@ -61,6 +61,18 @@ rules:
         trusted_files:
           - scripts/{TEST_SCRIPT_NAME}
 """
+POLICY_WITH_COMMAND_CONDITION = f"""
+rules:
+  - name: "Test rule"
+    conditions:
+      command:
+        run: "check"
+        trusted_files:
+          - scripts/{BACKUP_SCRIPT_NAME}
+    actions:
+      - name: "Last"
+        run: "last"
+"""
 
 
 def test_trusted_policy_runs_all_actions(
@@ -176,7 +188,12 @@ def test_untrusted_policy_runs_with_warning_if_trust_is_not_required(
     policy = write_policy(workspace, POLICY)
 
     with caplog.at_level(logging.WARNING):
-        engine = build_trusted_rule_engine(trust_store, policy, require_trust=False)
+        engine = build_trusted_rule_engine(
+            trust_store,
+            policy,
+            require_trust_for_actions=False,
+            require_trust_for_conditions=False,
+        )
         engine.evaluate()
 
     assert "not trusted" in caplog.text
@@ -187,6 +204,128 @@ def test_trust_removed_while_running_stops_actions_with_trusted_files(
     trust_store: TrustStore, workspace: Path, command_provider: Mock
 ) -> None:
     policy = write_policy(workspace, POLICY)
+    trust_policy_with_fixed_time(trust_store, policy)
+    engine = build_trusted_rule_engine(trust_store, policy)
+
+    trust_store.untrust([policy])
+
+    with pytest.raises(FileIntegrityError, match="is not trusted yet"):
+        engine.evaluate()
+
+    command_provider.run.assert_not_called()
+
+
+#########################
+# Command condition trust
+#########################
+
+
+def test_trusted_policy_with_command_condition_runs_condition_and_actions(
+    trust_store: TrustStore, workspace: Path, command_provider: Mock
+) -> None:
+    policy = write_policy(workspace, POLICY_WITH_COMMAND_CONDITION)
+    trust_policy_with_fixed_time(trust_store, policy)
+
+    result = build_trusted_rule_engine(trust_store, policy).evaluate()
+
+    assert result.action_triggered is True
+    assert get_commands(command_provider) == ["check", "last"]
+
+
+# The conditions of the policy are going to run, even if no action does
+def test_untrusted_policy_with_command_condition_is_rejected_if_only_conditions_require_trust(
+    trust_store: TrustStore, workspace: Path, command_provider: Mock
+) -> None:
+    policy = write_policy(workspace, POLICY_WITH_COMMAND_CONDITION)
+
+    with pytest.raises(PolicyNotTrustedError):
+        build_trusted_rule_engine(
+            trust_store,
+            policy,
+            require_trust_for_actions=False,
+            require_trust_for_conditions=True,
+        )
+
+    command_provider.run.assert_not_called()
+
+
+def test_untrusted_policy_without_command_condition_only_warns_if_only_conditions_require_trust(
+    trust_store: TrustStore,
+    workspace: Path,
+    command_provider: Mock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    policy = write_policy(workspace, POLICY)
+
+    with caplog.at_level(logging.WARNING):
+        engine = build_trusted_rule_engine(
+            trust_store,
+            policy,
+            require_trust_for_actions=False,
+            require_trust_for_conditions=True,
+        )
+        engine.evaluate()
+
+    assert "not trusted" in caplog.text
+    assert get_commands(command_provider) == ["backup", "last"]
+
+
+def test_modified_file_of_command_condition_is_rejected_when_loading(
+    trust_store: TrustStore, workspace: Path
+) -> None:
+    policy = write_policy(workspace, POLICY_WITH_COMMAND_CONDITION)
+    trust_policy_with_fixed_time(trust_store, policy)
+    modify_file(workspace / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME)
+
+    with pytest.raises(PolicyNotTrustedError):
+        build_trusted_rule_engine(trust_store, policy)
+
+
+# The error is no ConditionEvaluationError, so it is not hidden by the evaluation of the condition
+def test_file_modified_after_loading_prevents_the_command_condition_from_running(
+    trust_store: TrustStore, workspace: Path, command_provider: Mock
+) -> None:
+    policy = write_policy(workspace, POLICY_WITH_COMMAND_CONDITION)
+    trust_policy_with_fixed_time(trust_store, policy)
+    engine = build_trusted_rule_engine(trust_store, policy)
+
+    modify_file(workspace / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME)
+
+    with pytest.raises(FileIntegrityError, match="was modified since it was trusted"):
+        engine.evaluate()
+
+    command_provider.run.assert_not_called()
+
+
+def test_file_modified_after_loading_only_warns_if_conditions_do_not_require_trust(
+    trust_store: TrustStore,
+    workspace: Path,
+    command_provider: Mock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    policy = write_policy(workspace, POLICY_WITH_COMMAND_CONDITION)
+    trust_policy_with_fixed_time(trust_store, policy)
+    engine = build_trusted_rule_engine(
+        trust_store,
+        policy,
+        require_trust_for_actions=True,
+        require_trust_for_conditions=False,
+    )
+
+    modify_file(workspace / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME)
+
+    with caplog.at_level(logging.WARNING):
+        result = engine.evaluate()
+
+    assert "was modified since it was trusted" in caplog.text
+    assert result.action_triggered is True
+    assert get_commands(command_provider) == ["check", "last"]
+
+
+def test_trust_removed_while_running_stops_command_conditions_with_trusted_files(
+    trust_store: TrustStore, workspace: Path, command_provider: Mock
+) -> None:
+    policy = write_policy(workspace, POLICY_WITH_COMMAND_CONDITION)
     trust_policy_with_fixed_time(trust_store, policy)
     engine = build_trusted_rule_engine(trust_store, policy)
 

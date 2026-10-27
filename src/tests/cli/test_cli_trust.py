@@ -12,7 +12,11 @@ from powerrules.trust.store import (
     TRUST_STORE_FILE_NAME,
     TrustStore,
 )
-from tests.factories import trust_policies_with_each_status, write_backup_script_policy
+from tests.factories import (
+    trust_policies_with_each_status,
+    write_backup_script_policy,
+    write_command_condition_policy,
+)
 from tests.helpers import (
     BACKUP_SCRIPT_RELATIVE_PATH,
     get_plain_output,
@@ -387,6 +391,90 @@ def test_cli_policy_run_does_not_run_policy_after_trust_was_removed(
     )
 
     assert result.exit_code == EXIT_POLICY_TRUST_ERROR
+    command_provider.run.assert_not_called()
+
+
+def test_cli_trust_add_trusts_files_of_command_conditions(tmp_path: Path) -> None:
+    policy_file = write_command_condition_policy(tmp_path)
+
+    result = runner.invoke(app, ["trust", "add", "--policy", str(policy_file)])
+
+    assert result.exit_code == 0
+    assert str((tmp_path / BACKUP_SCRIPT_RELATIVE_PATH).resolve()) in get_plain_output(
+        result
+    )
+
+
+# The command of a condition runs even in a dry run, so trust is required then
+def test_cli_policy_run_dry_run_requires_trust_for_command_condition(
+    tmp_path: Path, command_provider: Mock
+) -> None:
+    policy_file = write_command_condition_policy(tmp_path)
+
+    result = runner.invoke(
+        app, ["policy", "run", "--once", "--dry-run", "--policy", str(policy_file)]
+    )
+
+    assert result.exit_code == EXIT_POLICY_TRUST_ERROR
+    assert "trust add --policy" in result.output
+    command_provider.run.assert_not_called()
+
+
+def test_cli_policy_run_dry_run_runs_command_of_trusted_condition(
+    tmp_path: Path, command_provider: Mock
+) -> None:
+    policy_file = write_command_condition_policy(tmp_path)
+    trust_policy_via_cli(policy_file)
+
+    result = runner.invoke(
+        app, ["policy", "run", "--once", "--dry-run", "--policy", str(policy_file)]
+    )
+
+    assert result.exit_code == 0
+    assert "[DRY RUN] Rule 'Test rule' matched" in get_plain_output(result)
+    # Only the command of the condition runs, the one of the action does not
+    command_provider.run.assert_called_once()
+    assert command_provider.run.call_args.args[0].command == "check"
+
+
+def test_cli_policy_run_dry_run_can_skip_trust_requirement_of_command_condition(
+    tmp_path: Path, command_provider: Mock
+) -> None:
+    policy_file = write_command_condition_policy(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "policy",
+            "run",
+            "--once",
+            "--dry-run",
+            "--no-require-trust",
+            "--policy",
+            str(policy_file),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "are not trusted" in result.output
+    command_provider.run.assert_called_once()
+
+
+def test_cli_policy_run_rejects_modified_file_of_command_condition(
+    tmp_path: Path, command_provider: Mock
+) -> None:
+    policy_file = write_command_condition_policy(tmp_path)
+    trust_policy_via_cli(policy_file)
+    modify_file(tmp_path / BACKUP_SCRIPT_RELATIVE_PATH)
+
+    result = runner.invoke(
+        app, ["policy", "run", "--once", "--policy", str(policy_file)]
+    )
+
+    assert result.exit_code == EXIT_POLICY_TRUST_ERROR
+    assert "modified" in get_table_row(
+        result.stdout, (tmp_path / BACKUP_SCRIPT_RELATIVE_PATH).resolve()
+    )
     command_provider.run.assert_not_called()
 
 

@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -692,6 +693,285 @@ def test_rule_execution_does_not_repeat_commands_for_unchanged_match(
     command_provider.run.assert_called_once()
 
 
+COMMAND_CONDITION_POLICY = """
+rules:
+  - name: "Service is active"
+    conditions:
+      command:
+        run: "systemctl is-active nginx"
+        shell: bash
+        working_directory: scripts
+        env:
+          RETRIES: 3
+        timeout: 5
+        stdout:
+          value: "active"
+    actions:
+      - name: "Notify"
+        run: "echo notify"
+"""
+
+CONDITION_COMMAND = "systemctl is-active nginx"
+
+
+def make_condition_provider(*outcomes: CommandResult | Exception) -> Mock:
+    """Create a mocked command provider which returns the outcomes of the consecutive commands one after another."""
+    command_provider = make_command_provider()
+    command_provider.run.side_effect = list(outcomes)
+
+    return command_provider
+
+
+####################
+# Command conditions
+####################
+
+
+def test_rule_execution_runs_command_condition_before_actions(tmp_path: Path) -> None:
+    command_provider = make_condition_provider(
+        CommandResult(exit_code=0, stdout="active\n"),
+        CommandResult(exit_code=0),
+    )
+    engine = build_rule_engine_from_policy(
+        tmp_path, COMMAND_CONDITION_POLICY, command_provider=command_provider
+    )
+
+    result = engine.evaluate()
+
+    assert result.action_triggered is True
+    assert get_commands(command_provider) == [CONDITION_COMMAND, "echo notify"]
+
+    condition_request, action_request = (
+        call.args[0] for call in command_provider.run.call_args_list
+    )
+
+    assert condition_request.shell is Shell.BASH
+    assert condition_request.working_directory == tmp_path / SCRIPT_DIRECTORY_NAME
+    assert condition_request.timeout == 5
+    assert condition_request.wait is True
+    # A condition does not receive the variables of an action
+    assert condition_request.environment == {"RETRIES": "3"}
+    assert action_request.environment == {
+        RULE_NAME_ENVIRONMENT_VARIABLE: "Service is active",
+        ACTION_NAME_ENVIRONMENT_VARIABLE: "Notify",
+    }
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        # The output does not match
+        CommandResult(exit_code=0, stdout="inactive\n"),
+        # The exit code does not count as success
+        CommandResult(exit_code=3, stdout="active\n"),
+    ],
+)
+def test_rule_execution_does_not_match_if_command_condition_does_not_match(
+    tmp_path: Path, outcome: CommandResult
+) -> None:
+    command_provider = make_condition_provider(outcome)
+    engine = build_rule_engine_from_policy(
+        tmp_path, COMMAND_CONDITION_POLICY, command_provider=command_provider
+    )
+
+    result = engine.evaluate()
+
+    # An unexpected result is no error, the actions simply do not run
+    assert result.matched_rule is None
+    assert get_commands(command_provider) == [CONDITION_COMMAND]
+
+
+def test_rule_execution_compares_stripped_multi_line_output_of_command_condition(
+    tmp_path: Path,
+) -> None:
+    command_provider = make_condition_provider(
+        CommandResult(exit_code=0, stdout="line 1\nERROR here\nline 3\n\n"),
+        CommandResult(exit_code=0),
+    )
+    engine = build_rule_engine_from_policy(
+        tmp_path,
+        """
+rules:
+  - name: "Error in output"
+    conditions:
+      command:
+        run: "check"
+        stdout:
+          value: ".*error.*"
+          match:
+            type: regex
+            case_sensitive: false
+    actions:
+      - run: "echo test"
+""",
+        command_provider=command_provider,
+    )
+
+    assert engine.evaluate().action_triggered is True
+
+
+def test_rule_execution_accepts_configured_success_exit_codes_of_command_condition(
+    tmp_path: Path,
+) -> None:
+    engine = build_rule_engine_from_policy(
+        tmp_path,
+        """
+rules:
+  - name: "Exit code rule"
+    conditions:
+      command:
+        run: "check"
+        success_exit_codes: [2]
+    actions:
+      - run: "echo test"
+""",
+        command_provider=make_condition_provider(
+            CommandResult(exit_code=2), CommandResult(exit_code=0)
+        ),
+    )
+
+    assert engine.evaluate().action_triggered is True
+
+
+def test_rule_execution_negates_command_condition(tmp_path: Path) -> None:
+    engine = build_rule_engine_from_policy(
+        tmp_path,
+        """
+rules:
+  - name: "Service is not running"
+    conditions:
+      not:
+        command:
+          run: "check"
+    actions:
+      - run: "echo test"
+""",
+        command_provider=make_condition_provider(
+            CommandResult(exit_code=1), CommandResult(exit_code=0)
+        ),
+    )
+
+    assert engine.evaluate().action_triggered is True
+
+
+def test_rule_execution_does_not_run_command_condition_after_false_condition(
+    tmp_path: Path,
+) -> None:
+    command_provider = make_command_provider()
+    engine = build_rule_engine_from_policy(
+        tmp_path,
+        """
+rules:
+  - name: "Short circuit"
+    conditions:
+      and:
+        - process:
+            name: "backup.exe"
+            exists: true
+        - command:
+            run: "check"
+    actions:
+      - run: "echo test"
+""",
+        command_provider=command_provider,
+    )
+
+    assert engine.evaluate().matched_rule is None
+    command_provider.run.assert_not_called()
+
+
+def test_rule_execution_uses_first_rule_with_matching_command_condition(
+    tmp_path: Path,
+) -> None:
+    command_provider = make_condition_provider(
+        CommandResult(exit_code=1),
+        CommandResult(exit_code=0),
+        CommandResult(exit_code=0),
+    )
+    engine = build_rule_engine_from_policy(
+        tmp_path,
+        """
+rules:
+  - name: "First"
+    conditions:
+      command:
+        run: "check first"
+    actions:
+      - run: "echo first"
+
+  - name: "Second"
+    conditions:
+      command:
+        run: "check second"
+    actions:
+      - run: "echo second"
+""",
+        command_provider=command_provider,
+    )
+
+    result = engine.evaluate()
+
+    assert result.matched_rule is not None
+    assert result.matched_rule.name == "Second"
+    assert get_commands(command_provider) == [
+        "check first",
+        "check second",
+        "echo second",
+    ]
+
+
+# Conditions are evaluated in a dry run, only the actions are not executed
+def test_rule_execution_dry_run_runs_command_condition_but_not_actions(
+    tmp_path: Path,
+) -> None:
+    command_provider = make_condition_provider(
+        CommandResult(exit_code=0, stdout="active\n")
+    )
+    engine = build_rule_engine_from_policy(
+        tmp_path, COMMAND_CONDITION_POLICY, command_provider=command_provider
+    )
+
+    result = engine.evaluate(dry_run=True)
+
+    assert result.action_triggered is True
+    assert get_commands(command_provider) == [CONDITION_COMMAND]
+
+
+def test_rule_execution_reports_timeout_of_command_condition(tmp_path: Path) -> None:
+    command_provider = make_condition_provider(TimeoutError())
+    engine = build_rule_engine_from_policy(
+        tmp_path, COMMAND_CONDITION_POLICY, command_provider=command_provider
+    )
+
+    with pytest.raises(
+        ConditionEvaluationError,
+        match="Command of a command condition timed out after 5 seconds",
+    ) as exc_info:
+        engine.evaluate()
+
+    assert isinstance(exc_info.value.__cause__, TimeoutError)
+    assert get_commands(command_provider) == [CONDITION_COMMAND]
+
+
+def test_rule_execution_reports_command_condition_which_cannot_be_started(
+    tmp_path: Path,
+) -> None:
+    original_error = FileNotFoundError("Test shell missing")
+    command_provider = make_condition_provider(original_error)
+    engine = build_rule_engine_from_policy(
+        tmp_path, COMMAND_CONDITION_POLICY, command_provider=command_provider
+    )
+
+    with pytest.raises(
+        ConditionEvaluationError,
+        match="Command of a command condition could not be started: Test shell missing",
+    ) as exc_info:
+        engine.evaluate()
+
+    assert exc_info.value.__cause__ is original_error
+    assert get_commands(command_provider) == [CONDITION_COMMAND]
+
+
 #################################
 # Tests with real child processes
 #################################
@@ -739,3 +1019,29 @@ rules:
 
     with pytest.raises(ActionExecutionError, match="returned exit code 3"):
         engine.evaluate()
+
+
+@posix_only
+def test_rule_execution_runs_real_command_condition(tmp_path: Path) -> None:
+    engine = build_rule_engine_from_policy(
+        tmp_path,
+        """
+rules:
+  - name: "Real condition"
+    conditions:
+      command:
+        run: 'echo "ready"; echo "warning" >&2'
+        stdout:
+          value: "ready"
+        stderr:
+          value: "warn"
+          match:
+            type: contains
+    actions:
+      - run: 'echo "$POWERRULES_RULE_NAME" > marker.txt'
+""",
+        command_provider=SubprocessCommandProvider(Shell.SH),
+    )
+
+    assert engine.evaluate().action_triggered is True
+    assert (tmp_path / "marker.txt").read_text(encoding="utf-8") == "Real condition\n"

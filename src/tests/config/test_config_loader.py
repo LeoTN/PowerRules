@@ -6,6 +6,7 @@ import yaml
 from pydantic import ValidationError
 
 from powerrules.conditions.datetime import Month, Weekday
+from powerrules.conditions.matcher import MatchType
 from powerrules.config.loader import ConfigurationLoader
 from powerrules.config.models import DateRangeConfiguration, DateTimeRangeConfiguration
 from powerrules.engine.exceptions import PolicyNotTrustedError
@@ -35,6 +36,38 @@ rules:
         trusted_files:
           - ./scripts/a.sh
           - b.sh
+"""
+POLICY_WITH_COMMAND_CONDITION = """
+rules:
+  - name: "Test rule"
+    conditions:
+      and:
+        - command:
+            run: "check.sh"
+            shell: bash
+            working_directory: scripts
+            env:
+              RETRIES: 3
+            timeout: .inf
+            success_exit_codes: [0, 2]
+            stdout:
+              value: "active"
+              match:
+                type: contains
+            stderr:
+              value: ".*error.*"
+              match:
+                type: regex
+                case_sensitive: false
+            trusted_files:
+              - scripts/check.sh
+        - process:
+            name: "backup.exe"
+            exists: false
+    actions:
+      - run: "echo test"
+        trusted_files:
+          - scripts/a.sh
 """
 
 
@@ -333,22 +366,66 @@ rules:
 #####################
 
 
-def test_loader_verifies_policy_content_and_unique_resolved_files(
+def test_configuration_loader_loads_command_condition(tmp_path: Path) -> None:
+    configuration_file = write_policy(tmp_path, POLICY_WITH_COMMAND_CONDITION)
+
+    configuration = ConfigurationLoader().load(configuration_file)
+
+    and_conditions = configuration.rules[0].conditions.and_conditions
+
+    assert and_conditions is not None
+
+    command = and_conditions[0].command
+
+    assert command is not None
+    assert command.run == "check.sh"
+    assert command.shell is Shell.BASH
+    assert command.working_directory == Path(SCRIPT_DIRECTORY_NAME)
+    assert command.env == {"RETRIES": "3"}
+    # The YAML value ".inf" means that there is no time limit
+    assert command.timeout is None
+    assert command.success_exit_codes == [0, 2]
+    assert command.stdout is not None
+    assert command.stdout.value == "active"
+    assert command.stdout.match.type is MatchType.CONTAINS
+    assert command.stderr is not None
+    assert command.stderr.match.type is MatchType.REGEX
+    assert command.stderr.match.case_sensitive is False
+    assert command.trusted_files == [Path("scripts/check.sh")]
+
+
+def test_loader_verifies_trusted_files_of_conditions_before_those_of_actions(
     tmp_path: Path,
 ) -> None:
-    policy = write_policy(tmp_path, POLICY_WITH_DUPLICATE_FILES)
+    policy = write_policy(tmp_path, POLICY_WITH_COMMAND_CONDITION)
     checker = make_trust_checker()
 
     ConfigurationLoader(trust_checker=checker).load(policy)
 
-    checker.verify.assert_called_once_with(
-        policy.resolve(),
-        policy.read_bytes(),
-        (
-            tmp_path.resolve() / SCRIPT_DIRECTORY_NAME / "a.sh",
-            tmp_path.resolve() / "b.sh",
-        ),
+    assert checker.verify.call_args.args[2] == (
+        tmp_path.resolve() / SCRIPT_DIRECTORY_NAME / "check.sh",
+        tmp_path.resolve() / SCRIPT_DIRECTORY_NAME / "a.sh",
     )
+
+
+@pytest.mark.parametrize(
+    ("policy_content", "expected"),
+    [
+        (POLICY_WITH_COMMAND_CONDITION, True),
+        (POLICY_WITH_DUPLICATE_FILES, False),
+    ],
+)
+def test_loader_tells_checker_whether_policy_contains_command_conditions(
+    tmp_path: Path,
+    policy_content: str,
+    expected: bool,
+) -> None:
+    policy = write_policy(tmp_path, policy_content)
+    checker = make_trust_checker()
+
+    ConfigurationLoader(trust_checker=checker).load(policy)
+
+    assert checker.verify.call_args.kwargs["has_command_conditions"] is expected
 
 
 def test_loader_resolves_trusted_files_against_directory_of_policy(

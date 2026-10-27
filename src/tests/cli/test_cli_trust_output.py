@@ -233,13 +233,18 @@ def test_get_branch_uses_ascii_fallback_for_consoles_without_unicode(
 ############################
 
 
-@pytest.mark.parametrize("require_trust", [True, False])
+@pytest.mark.parametrize("require_trust_for_actions", [True, False])
+@pytest.mark.parametrize("require_trust_for_conditions", [True, False])
 def test_create_trust_checker_uses_trust_store_and_command_builder(
-    require_trust: bool,
+    require_trust_for_actions: bool,
+    require_trust_for_conditions: bool,
 ) -> None:
-    checker = create_trust_checker(require_trust)
+    checker = create_trust_checker(
+        require_trust_for_actions, require_trust_for_conditions
+    )
 
-    assert checker.require_trust is require_trust
+    assert checker.require_trust_for_actions is require_trust_for_actions
+    assert checker.require_trust_for_conditions is require_trust_for_conditions
     assert isinstance(checker.trust_store, TrustStore)
     assert checker.trust_command_builder is build_trust_command
     assert checker.reporter is not None
@@ -248,7 +253,7 @@ def test_create_trust_checker_uses_trust_store_and_command_builder(
 def test_create_trust_checker_reporter_shows_table_if_requested(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    checker = create_trust_checker(False, always_show_table=True)
+    checker = create_trust_checker(False, False, always_show_table=True)
 
     assert checker.reporter is not None
 

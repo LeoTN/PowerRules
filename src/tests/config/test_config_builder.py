@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from powerrules.actions.command import DEFAULT_ACTION_TIMEOUT_SECONDS
+from powerrules.conditions.command import CommandCondition
 from powerrules.conditions.datetime import (
     DateTimeCondition,
     DateTimeRange,
@@ -26,13 +27,15 @@ from powerrules.config.models import (
 )
 from powerrules.engine.exceptions import ConfigurationError
 from powerrules.engine.models import RuleSet
-from powerrules.providers.command import Shell
+from powerrules.providers.command import CommandResult, Shell
 from tests.factories import (
     build_command_action,
+    build_command_condition,
     build_datetime_condition,
     build_rule,
     make_action_configuration,
     make_clock_provider,
+    make_command_condition_configuration,
     make_command_provider,
     make_configuration_builder,
     make_datetime_condition_configuration,
@@ -576,3 +579,179 @@ def test_builder_passes_files_verifier_to_actions() -> None:
 
 def test_builder_builds_actions_without_trusted_files() -> None:
     assert build_command_action().trusted_files == ()
+
+
+#########################
+# Command condition tests
+#########################
+
+
+def test_builder_builds_command_condition_with_defaults() -> None:
+    command_provider = make_command_provider()
+
+    condition = build_command_condition(
+        builder=make_configuration_builder(command_provider=command_provider)
+    )
+
+    runner = condition.runner
+    assert runner.command_provider is command_provider
+    assert runner.command == "echo test"
+    assert runner.working_directory == DEFAULT_BASE_DIRECTORY
+    assert runner.timeout == DEFAULT_ACTION_TIMEOUT_SECONDS
+    assert runner.shell is None
+    assert runner.environment == {}
+    assert runner.success_exit_codes == frozenset({0})
+    assert runner.wait is True
+    assert runner.stdout_matcher is None
+    assert runner.stderr_matcher is None
+    assert runner.trusted_files == ()
+    assert runner.files_verifier is None
+
+
+def test_builder_passes_configured_command_condition_options() -> None:
+    condition = build_command_condition(
+        make_command_condition_configuration(
+            run=BACKUP_SCRIPT_NAME,
+            shell="bash",
+            working_directory=SCRIPT_DIRECTORY_NAME,
+            env={"KEY": "value"},
+            timeout=5.5,
+            success_exit_codes=[0, 2],
+            trusted_files=["scripts/a.sh"],
+        )
+    )
+
+    runner = condition.runner
+    assert runner.command == BACKUP_SCRIPT_NAME
+    assert runner.shell is Shell.BASH
+    assert runner.working_directory == DEFAULT_BASE_DIRECTORY / SCRIPT_DIRECTORY_NAME
+    assert runner.environment == {"KEY": "value"}
+    assert runner.timeout == 5.5
+    assert runner.success_exit_codes == frozenset({0, 2})
+    assert runner.trusted_files == (
+        DEFAULT_BASE_DIRECTORY / SCRIPT_DIRECTORY_NAME / "a.sh",
+    )
+
+
+def test_builder_builds_command_condition_without_time_limit() -> None:
+    condition = build_command_condition(
+        make_command_condition_configuration(timeout=None)
+    )
+
+    assert condition.runner.timeout is None
+
+
+def test_builder_keeps_absolute_working_directory_of_command_condition(
+    tmp_path: Path,
+) -> None:
+    condition = build_command_condition(
+        make_command_condition_configuration(working_directory=str(tmp_path / "other"))
+    )
+
+    assert condition.runner.working_directory == tmp_path / "other"
+
+
+def test_builder_builds_output_matchers_of_command_condition() -> None:
+    condition = build_command_condition(
+        make_command_condition_configuration(
+            stdout={
+                "value": "active",
+                "match": {"type": "contains", "case_sensitive": False},
+            },
+            stderr={"value": ".*error.*", "match": {"type": "regex"}},
+        )
+    )
+
+    stdout_matcher = condition.runner.stdout_matcher
+    stderr_matcher = condition.runner.stderr_matcher
+
+    assert stdout_matcher is not None
+    assert stdout_matcher.pattern == "active"
+    assert stdout_matcher.match_type is MatchType.CONTAINS
+    assert stdout_matcher.case_sensitive is False
+    assert stdout_matcher.matches("Service is ACTIVE") is True
+
+    assert stderr_matcher is not None
+    assert stderr_matcher.match_type is MatchType.REGEX
+    assert stderr_matcher.case_sensitive is True
+    assert stderr_matcher.matches("an error\nhappened") is True
+
+
+def test_builder_passes_condition_files_verifier_to_command_conditions_only() -> None:
+    files_verifier = make_files_verifier()
+    condition_files_verifier = make_files_verifier()
+    builder = make_configuration_builder(
+        files_verifier=files_verifier,
+        condition_files_verifier=condition_files_verifier,
+    )
+
+    condition = build_command_condition(
+        make_command_condition_configuration(trusted_files=["a.sh"]), builder=builder
+    )
+    action = build_command_action(
+        make_action_configuration(trusted_files=["a.sh"]), builder=builder
+    )
+
+    assert condition.runner.files_verifier is condition_files_verifier
+    assert action.files_verifier is files_verifier
+
+
+@pytest.mark.parametrize(("exit_code", "expected"), [(0, True), (1, False)])
+def test_builder_builds_executable_command_condition(
+    exit_code: int,
+    expected: bool,
+) -> None:
+    command_provider = make_command_provider(CommandResult(exit_code=exit_code))
+
+    condition = build_command_condition(
+        make_command_condition_configuration(env={"KEY": "value"}),
+        builder=make_configuration_builder(command_provider=command_provider),
+    )
+
+    assert condition.evaluate() is expected
+
+    request = command_provider.run.call_args.args[0]
+
+    assert request.command == "echo test"
+    assert request.working_directory == DEFAULT_BASE_DIRECTORY
+    # A condition does not receive the variables of an action
+    assert request.environment == {"KEY": "value"}
+
+
+def test_builder_builds_command_condition_within_logical_conditions() -> None:
+    rule = build_rule(
+        ConditionConfiguration(
+            and_conditions=[
+                make_process_condition_configuration(name="backup.exe", exists=False),
+                ConditionConfiguration(
+                    not_condition=make_command_condition_configuration()
+                ),
+            ]
+        )
+    )
+
+    assert isinstance(rule.condition, AndCondition)
+    assert isinstance(rule.condition.conditions[1], NotCondition)
+    assert isinstance(rule.condition.conditions[1].condition, CommandCondition)
+
+
+def test_builder_builds_output_matchers_of_actions() -> None:
+    action = build_command_action(
+        make_action_configuration(
+            stdout={"value": "ok", "match": {"type": "contains"}},
+            stderr={"value": "", "match": {"case_sensitive": False}},
+        )
+    )
+
+    assert action.stdout_matcher is not None
+    assert action.stdout_matcher.pattern == "ok"
+    assert action.stdout_matcher.match_type is MatchType.CONTAINS
+    assert action.stderr_matcher is not None
+    assert action.stderr_matcher.case_sensitive is False
+
+
+def test_builder_builds_actions_without_output_matchers_by_default() -> None:
+    action = build_command_action()
+
+    assert action.stdout_matcher is None
+    assert action.stderr_matcher is None

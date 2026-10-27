@@ -16,6 +16,7 @@ from tests.factories import make_clock_provider, make_policy_yaml
 from tests.helpers import (
     BACKUP_SCRIPT_NAME,
     SCRIPT_DIRECTORY_NAME,
+    TEST_SCRIPT_NAME,
     TRUSTED_AT,
     create_symlink,
     modify_file,
@@ -39,6 +40,45 @@ rules:
         trusted_files:
           - scripts/./{BACKUP_SCRIPT_NAME}
 """
+POLICY_WITH_CONDITION_FILES = f"""
+rules:
+  - name: "Test rule"
+    conditions:
+      command:
+        run: "check"
+        trusted_files:
+          - scripts/{TEST_SCRIPT_NAME}
+    actions:
+      - name: "Backup"
+        run: "backup"
+        trusted_files:
+          - scripts/{BACKUP_SCRIPT_NAME}
+"""
+
+
+def test_trust_policy_trusts_files_of_conditions_and_actions(
+    trust_store: TrustStore, workspace: Path
+) -> None:
+    policy = write_policy(workspace, POLICY_WITH_CONDITION_FILES)
+    condition_script = workspace / SCRIPT_DIRECTORY_NAME / TEST_SCRIPT_NAME
+    action_script = workspace / SCRIPT_DIRECTORY_NAME / BACKUP_SCRIPT_NAME
+
+    report = trust_policy(policy, trust_store, make_clock_provider(TRUSTED_AT))
+
+    entry = trust_store.get_entry(policy)
+
+    assert entry is not None
+    assert {file.path for file in entry.trusted_files.values()} == {
+        str(condition_script),
+        str(action_script),
+    }
+    # The files of the conditions are listed first
+    assert [entry.path for entry in report.entries] == [
+        policy,
+        condition_script,
+        action_script,
+    ]
+    assert report.is_trusted is True
 
 
 def test_trust_policy_trusts_policy_and_files(
