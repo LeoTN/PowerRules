@@ -10,7 +10,7 @@ from powerrules.providers.command import CommandProvider, CommandResult, Shell
 logger = logging.getLogger(__name__)
 
 # Time in seconds a command may run before it is terminated
-DEFAULT_ACTION_TIMEOUT_SECONDS = 60
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 60
 
 # Variables with this prefix are set by PowerRules for the started command
 RESERVED_ENVIRONMENT_PREFIX = "POWERRULES_"
@@ -31,7 +31,7 @@ class CommandAction:
         rule_name: str,
         shell: Shell | None = None,
         environment: Mapping[str, str] | None = None,
-        timeout: float | None = DEFAULT_ACTION_TIMEOUT_SECONDS,
+        timeout: float | None = DEFAULT_COMMAND_TIMEOUT_SECONDS,
         success_exit_codes: Collection[int] = (0,),
         wait: bool = True,
         continue_on_error: bool = False,

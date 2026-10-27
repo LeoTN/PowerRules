@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from powerrules.actions.command import DEFAULT_ACTION_TIMEOUT_SECONDS
+from powerrules.actions.command import DEFAULT_COMMAND_TIMEOUT_SECONDS
 from powerrules.conditions.datetime import Month, Weekday
 from powerrules.conditions.matcher import MatchType
 from powerrules.config.models import (
@@ -204,7 +204,7 @@ def test_action_configuration_uses_defaults() -> None:
     assert action.shell is None
     assert action.working_directory is None
     assert action.env == {}
-    assert action.timeout == DEFAULT_ACTION_TIMEOUT_SECONDS
+    assert action.timeout == DEFAULT_COMMAND_TIMEOUT_SECONDS
     assert action.success_exit_codes == [0]
     assert action.wait is True
     assert action.continue_on_error is False
@@ -1283,7 +1283,7 @@ def test_command_condition_configuration_uses_defaults() -> None:
     assert command.shell is None
     assert command.working_directory is None
     assert command.env == {}
-    assert command.timeout == DEFAULT_ACTION_TIMEOUT_SECONDS
+    assert command.timeout == DEFAULT_COMMAND_TIMEOUT_SECONDS
     assert command.success_exit_codes == [0]
     assert command.stdout is None
     assert command.stderr is None

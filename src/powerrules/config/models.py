@@ -20,7 +20,7 @@ from pydantic import (
 )
 
 from powerrules.actions.command import (
-    DEFAULT_ACTION_TIMEOUT_SECONDS,
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
     RESERVED_ENVIRONMENT_PREFIX,
 )
 from powerrules.conditions.datetime import Month, Weekday
@@ -338,7 +338,7 @@ class CommandConfiguration(BaseModel):
     # The values may be secrets, so they are excluded from the representation of the model
     env: dict[str, str] = Field(default_factory=dict, repr=False)
     # None means that the command may run without a time limit
-    timeout: StrictInt | StrictFloat | None = DEFAULT_ACTION_TIMEOUT_SECONDS
+    timeout: StrictInt | StrictFloat | None = DEFAULT_COMMAND_TIMEOUT_SECONDS
     success_exit_codes: list[StrictInt] = Field(
         default_factory=lambda: [0], min_length=1
     )

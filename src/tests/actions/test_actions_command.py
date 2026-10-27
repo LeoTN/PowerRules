@@ -5,7 +5,7 @@ import pytest
 
 from powerrules.actions.command import (
     ACTION_NAME_ENVIRONMENT_VARIABLE,
-    DEFAULT_ACTION_TIMEOUT_SECONDS,
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
     RULE_NAME_ENVIRONMENT_VARIABLE,
 )
 from powerrules.conditions.matcher import MatchType, StringMatcher
@@ -68,7 +68,7 @@ def test_command_action_runs_command_with_default_request() -> None:
                 RULE_NAME_ENVIRONMENT_VARIABLE: "Test rule",
                 ACTION_NAME_ENVIRONMENT_VARIABLE: "Test action",
             },
-            timeout=DEFAULT_ACTION_TIMEOUT_SECONDS,
+            timeout=DEFAULT_COMMAND_TIMEOUT_SECONDS,
             wait=True,
             shell=None,
         )

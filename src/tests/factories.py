@@ -12,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 
 from powerrules.actions.base import Action
 from powerrules.actions.command import (
-    DEFAULT_ACTION_TIMEOUT_SECONDS,
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
     CommandAction,
     FilesVerifier,
 )
@@ -144,7 +144,7 @@ def make_command_action(
     rule_name: str = "Test rule",
     shell: Shell | None = None,
     environment: Mapping[str, str] | None = None,
-    timeout: float | None = DEFAULT_ACTION_TIMEOUT_SECONDS,
+    timeout: float | None = DEFAULT_COMMAND_TIMEOUT_SECONDS,
     success_exit_codes: Collection[int] = (0,),
     wait: bool = True,
     continue_on_error: bool = False,
@@ -199,7 +199,7 @@ def make_command_runner(
     *,
     command: str = "echo test",
     working_directory: Path = DEFAULT_WORKING_DIRECTORY,
-    timeout: float | None = DEFAULT_ACTION_TIMEOUT_SECONDS,
+    timeout: float | None = DEFAULT_COMMAND_TIMEOUT_SECONDS,
     shell: Shell | None = None,
     environment: Mapping[str, str] | None = None,
     success_exit_codes: Collection[int] = (0,),
@@ -249,7 +249,7 @@ def make_command_condition(
     *,
     command: str = "echo test",
     working_directory: Path = DEFAULT_WORKING_DIRECTORY,
-    timeout: float | None = DEFAULT_ACTION_TIMEOUT_SECONDS,
+    timeout: float | None = DEFAULT_COMMAND_TIMEOUT_SECONDS,
     shell: Shell | None = None,
     environment: Mapping[str, str] | None = None,
     success_exit_codes: Collection[int] = (0,),

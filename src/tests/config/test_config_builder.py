@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from powerrules.actions.command import DEFAULT_ACTION_TIMEOUT_SECONDS
+from powerrules.actions.command import DEFAULT_COMMAND_TIMEOUT_SECONDS
 from powerrules.conditions.command import CommandCondition
 from powerrules.conditions.datetime import (
     DateTimeCondition,
@@ -391,7 +391,7 @@ def test_builder_builds_command_action_with_defaults() -> None:
     assert action.rule_name == "Test rule"
     assert action.shell is None
     assert action.environment == {}
-    assert action.timeout == DEFAULT_ACTION_TIMEOUT_SECONDS
+    assert action.timeout == DEFAULT_COMMAND_TIMEOUT_SECONDS
     assert action.success_exit_codes == frozenset({0})
     assert action.wait is True
     assert action.continue_on_error is False
@@ -597,7 +597,7 @@ def test_builder_builds_command_condition_with_defaults() -> None:
     assert runner.command_provider is command_provider
     assert runner.command == "echo test"
     assert runner.working_directory == DEFAULT_BASE_DIRECTORY
-    assert runner.timeout == DEFAULT_ACTION_TIMEOUT_SECONDS
+    assert runner.timeout == DEFAULT_COMMAND_TIMEOUT_SECONDS
     assert runner.shell is None
     assert runner.environment == {}
     assert runner.success_exit_codes == frozenset({0})

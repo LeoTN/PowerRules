@@ -2,7 +2,8 @@ from collections.abc import Sequence
 from datetime import datetime, time
 from pathlib import Path
 
-from powerrules.actions.command import CommandAction, FilesVerifier
+from powerrules.actions.command import CommandAction
+from powerrules.commands.runner import FilesVerifier
 from powerrules.conditions.base import Condition
 from powerrules.conditions.command import CommandCondition
 from powerrules.conditions.datetime import DateTimeCondition, DateTimeRange, TimeRange
