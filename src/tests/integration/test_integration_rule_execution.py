@@ -945,7 +945,7 @@ def test_rule_execution_reports_timeout_of_command_condition(tmp_path: Path) -> 
 
     with pytest.raises(
         ConditionEvaluationError,
-        match="Command of a command condition timed out after 5 seconds",
+        match="Command condition of rule 'Service is active' timed out after 5 seconds",
     ) as exc_info:
         engine.evaluate()
 
@@ -964,7 +964,7 @@ def test_rule_execution_reports_command_condition_which_cannot_be_started(
 
     with pytest.raises(
         ConditionEvaluationError,
-        match="Command of a command condition could not be started: Test shell missing",
+        match="Command condition of rule 'Service is active' could not be started: Test shell missing",
     ) as exc_info:
         engine.evaluate()
 

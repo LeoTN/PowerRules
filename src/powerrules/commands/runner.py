@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,8 @@ from powerrules.providers.command import (
     CommandResult,
     Shell,
 )
+
+logger = logging.getLogger(__name__)
 
 # Verifies the given trusted files right before a command runs and raises an error if they must not be used
 FilesVerifier = Callable[[Sequence[Path]], None]
@@ -116,11 +119,43 @@ class CommandRunner:
         return CommandRunnerResult(
             result=result,
             exit_code_matched=result.exit_code in self.success_exit_codes,
-            stdout_matched=self._matches(self.stdout_matcher, result.stdout),
-            stderr_matched=self._matches(self.stderr_matcher, result.stderr),
+            stdout_matched=self._matches("stdout", self.stdout_matcher, result.stdout),
+            stderr_matched=self._matches("stderr", self.stderr_matcher, result.stderr),
+        )
+
+    def describe_success_exit_codes(self) -> str:
+        """Describe the exit codes which count as success, e.g. for messages.
+
+        Returns:
+            The sorted exit codes separated by commas (e.g. "0, 3").
+        """
+        return ", ".join(
+            str(exit_code) for exit_code in sorted(self.success_exit_codes)
         )
 
     @staticmethod
-    def _matches(matcher: StringMatcher | None, output: str) -> bool:
-        """Return whether the stripped output matches the expectation, no expectation always matches."""
-        return matcher is None or matcher.matches(output.strip())
+    def _matches(stream: str, matcher: StringMatcher | None, output: str) -> bool:
+        """Return whether the stripped output matches the expectation, no expectation always matches.
+
+        The comparison is explained on debug level, which makes it easier to understand why an output does (not) match.
+
+        Args:
+            stream: Name of the compared stream, used in the message.
+            matcher: Expectation for the output, or None if any output is accepted.
+            output: Output of the command.
+
+        Returns:
+            True if the output matches or nothing is expected, otherwise False.
+        """
+        if matcher is None:
+            return True
+
+        stripped_output = output.strip()
+        is_matched = matcher.matches(stripped_output)
+
+        # Command output might contain secrets, so it is only logged on debug level
+        logger.debug(
+            f"Output on {stream} {'matched' if is_matched else 'did not match'}, {matcher.explain_expected_and_got(stripped_output)}"
+        )
+
+        return is_matched

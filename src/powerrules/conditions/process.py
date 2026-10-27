@@ -1,6 +1,10 @@
+import logging
+
 from powerrules.conditions.matcher import MatchType, StringMatcher
 from powerrules.engine.exceptions import ConditionEvaluationError
 from powerrules.providers.process import ProcessProvider
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessCondition:
@@ -38,4 +42,13 @@ class ProcessCondition:
                 f"Failed to determine whether process '{self.process_name}' exists"
             ) from e
 
-        return is_existing == self.expected_exists
+        is_met = is_existing == self.expected_exists
+
+        # The explanation needs a second pass over all names, so it is only built if the message is going to be logged
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                f"Process condition {'met' if is_met else 'not met'}, "
+                f"{self.matcher.explain_existence(process_names, 'process name', self.expected_exists)}"
+            )
+
+        return is_met

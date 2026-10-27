@@ -97,7 +97,9 @@ class ConfigurationBuilder:
         return Rule(
             name=rule_configuration.name,
             enabled=rule_configuration.enabled,
-            condition=self._build_condition(rule_configuration.conditions),
+            condition=self._build_condition(
+                rule_configuration.conditions, rule_configuration.name
+            ),
             actions=tuple(
                 self._build_action(
                     action_configuration,
@@ -114,11 +116,13 @@ class ConfigurationBuilder:
     def _build_condition(
         self,
         condition_configuration: ConditionConfiguration,
+        rule_name: str,
     ) -> Condition:
         """Build a condition from its configuration.
 
         Args:
             condition_configuration: Configuration of the condition.
+            rule_name: Name of the rule the condition belongs to, used in messages of conditions which run commands.
 
         Returns:
             The executable condition.
@@ -126,7 +130,7 @@ class ConfigurationBuilder:
         if condition_configuration.and_conditions is not None:
             return AndCondition(
                 conditions=tuple(
-                    self._build_condition(condition)
+                    self._build_condition(condition, rule_name)
                     for condition in condition_configuration.and_conditions
                 )
             )
@@ -134,14 +138,16 @@ class ConfigurationBuilder:
         if condition_configuration.or_conditions is not None:
             return OrCondition(
                 conditions=tuple(
-                    self._build_condition(condition)
+                    self._build_condition(condition, rule_name)
                     for condition in condition_configuration.or_conditions
                 )
             )
 
         if condition_configuration.not_condition is not None:
             return NotCondition(
-                condition=self._build_condition(condition_configuration.not_condition)
+                condition=self._build_condition(
+                    condition_configuration.not_condition, rule_name
+                )
             )
 
         if condition_configuration.process is not None:
@@ -154,7 +160,9 @@ class ConfigurationBuilder:
             return self._build_window_condition(condition_configuration.window)
 
         if condition_configuration.command is not None:
-            return self._build_command_condition(condition_configuration.command)
+            return self._build_command_condition(
+                condition_configuration.command, rule_name
+            )
 
         raise ConfigurationError("Condition configuration does not contain a condition")
 
@@ -250,11 +258,13 @@ class ConfigurationBuilder:
     def _build_command_condition(
         self,
         configuration: CommandConditionConfiguration,
+        rule_name: str,
     ) -> CommandCondition:
         """Build a command condition from its configuration.
 
         Args:
             configuration: Command condition configuration.
+            rule_name: Name of the rule the condition belongs to, used in messages.
 
         Returns:
             The executable command condition.
@@ -265,6 +275,7 @@ class ConfigurationBuilder:
             working_directory=self._resolve_working_directory(
                 configuration.working_directory
             ),
+            rule_name=rule_name,
             timeout=configuration.timeout,
             shell=configuration.shell,
             environment=configuration.env,

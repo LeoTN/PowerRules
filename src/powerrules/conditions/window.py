@@ -1,9 +1,13 @@
+import logging
+
 from powerrules.conditions.matcher import MatchType, StringMatcher
 from powerrules.engine.exceptions import (
     ConditionEvaluationError,
     ConditionEvaluationProviderNotAvailableError,
 )
 from powerrules.providers.window import WindowProvider
+
+logger = logging.getLogger(__name__)
 
 
 class WindowCondition:
@@ -49,4 +53,13 @@ class WindowCondition:
                 f"Failed to determine whether window '{self.window_title}' exists"
             ) from e
 
-        return window_exists == self.expected_exists
+        is_met = window_exists == self.expected_exists
+
+        # The explanation needs a second pass over all titles, so it is only built if the message is going to be logged
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                f"Window condition {'met' if is_met else 'not met'}, "
+                f"{self.matcher.explain_existence(window_titles, 'window title', self.expected_exists)}"
+            )
+
+        return is_met

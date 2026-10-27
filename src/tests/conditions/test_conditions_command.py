@@ -202,7 +202,7 @@ def test_command_condition_raises_evaluation_error_on_timeout() -> None:
         condition.evaluate()
 
     assert str(exc_info.value) == (
-        "Command of a command condition timed out after 5 seconds"
+        f"Command condition of rule '{condition.rule_name}' timed out after 5 seconds"
     )
     assert exc_info.value.__cause__ is original_error
     # A failed command is not the same as an unavailable provider
@@ -226,7 +226,7 @@ def test_command_condition_raises_evaluation_error_if_command_cannot_be_started(
         condition.evaluate()
 
     assert str(exc_info.value) == (
-        f"Command of a command condition could not be started: {error}"
+        f"Command condition of rule '{condition.rule_name}' could not be started: {error}"
     )
     assert exc_info.value.__cause__ is error
 
@@ -318,7 +318,7 @@ def test_command_condition_logs_command_only_on_debug_level(
 
     assert (
         logging.DEBUG,
-        "Command of command condition: echo secret",
+        f"Command of command condition of rule '{condition.rule_name}': echo secret",
     ) in get_log_entries(caplog, LOGGER_NAME)
 
 
@@ -336,8 +336,14 @@ def test_command_condition_logs_output_only_on_debug_level(
 
     logged = get_log_entries(caplog, LOGGER_NAME)
 
-    assert (logging.DEBUG, "Output of command condition (stdout):\nout") in logged
-    assert (logging.DEBUG, "Output of command condition (stderr):\nerr") in logged
+    assert (
+        logging.DEBUG,
+        f"Output of command condition of rule '{condition.rule_name}' (stdout):\nout",
+    ) in logged
+    assert (
+        logging.DEBUG,
+        f"Output of command condition of rule '{condition.rule_name}' (stderr):\nerr",
+    ) in logged
     assert all(level == logging.DEBUG for level, _ in logged)
 
 

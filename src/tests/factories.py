@@ -249,6 +249,7 @@ def make_command_condition(
     *,
     command: str = "echo test",
     working_directory: Path = DEFAULT_WORKING_DIRECTORY,
+    rule_name: str = "Test rule",
     timeout: float | None = DEFAULT_COMMAND_TIMEOUT_SECONDS,
     shell: Shell | None = None,
     environment: Mapping[str, str] | None = None,
@@ -264,6 +265,7 @@ def make_command_condition(
         command_provider: Provider which runs the command. Defaults to a mocked one.
         command: Command to run.
         working_directory: Directory the command is run in.
+        rule_name: Name of the rule where the command condition is located.
         timeout: Maximum run time in seconds, None for no time limit.
         shell: Shell to run the command with.
         environment: Additional environment variables for the command.
@@ -280,6 +282,7 @@ def make_command_condition(
         command_provider if command_provider is not None else make_command_provider(),
         command,
         working_directory,
+        rule_name=rule_name,
         timeout=timeout,
         shell=shell,
         environment=environment,

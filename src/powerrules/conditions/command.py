@@ -11,12 +11,15 @@ logger = logging.getLogger(__name__)
 
 
 class CommandCondition:
+    """Match depending on the result of a command."""
+
     def __init__(
         self,
         command_provider: CommandProvider,
         command: str,
         working_directory: Path,
         *,
+        rule_name: str,
         timeout: float | None,
         shell: Shell | None = None,
         environment: Mapping[str, str] | None = None,
@@ -35,6 +38,7 @@ class CommandCondition:
             command_provider: Provider which runs the command.
             command: Command to run.
             working_directory: Directory the command is run in.
+            rule_name: Name of the rule the condition belongs to, used in messages.
             timeout: Maximum run time in seconds, None for no time limit.
             shell: Shell to run the command with. None uses the default shell of the platform.
             environment: Additional environment variables for the command.
@@ -45,7 +49,7 @@ class CommandCondition:
             files_verifier: Called with the trusted files before every run, it raises an error if they must not be used.
                 None skips the verification.
         """
-        self.command = command
+        self.rule_name = rule_name
         self.runner = CommandRunner(
             command_provider=command_provider,
             command=command,
@@ -73,30 +77,32 @@ class CommandCondition:
             ConditionEvaluationError: If the command cannot be started or exceeds the timeout.
         """
         # The command is only logged on debug level, because it might contain secrets
-        logger.debug(f"Command of command condition: {self.command.strip()}")
+        logger.debug(
+            f"Command of command condition of rule '{self.rule_name}': {self.runner.command.strip()}"
+        )
 
         # TimeoutError is a subclass of OSError, so it has to be handled first
         try:
             outcome = self.runner.run()
         except TimeoutError as e:
             raise ConditionEvaluationError(
-                f"Command of a command condition timed out after {self.runner.timeout:g} seconds"
+                f"Command condition of rule '{self.rule_name}' timed out after {self.runner.timeout:g} seconds"
             ) from e
         except OSError as e:
             raise ConditionEvaluationError(
-                f"Command of a command condition could not be started: {e}"
+                f"Command condition of rule '{self.rule_name}' could not be started: {e}"
             ) from e
 
         self._log_output(outcome.result)
         logger.debug(
-            f"Command condition finished with exit code {outcome.result.exit_code}, "
+            f"Command condition of rule '{self.rule_name}' finished with exit code {outcome.result.exit_code} "
+            f"(expected one of: {self.runner.describe_success_exit_codes()}), "
             f"matched: exit code {outcome.exit_code_matched}, stdout {outcome.stdout_matched}, stderr {outcome.stderr_matched}"
         )
 
         return outcome.matched
 
-    @staticmethod
-    def _log_output(result: CommandResult) -> None:
+    def _log_output(self, result: CommandResult) -> None:
         """Log the output of the command on debug level.
 
         A condition which does not match is no failure, so the error output is never logged as an error.
@@ -108,7 +114,11 @@ class CommandCondition:
         stderr = result.stderr.strip()
 
         if stdout:
-            logger.debug(f"Output of command condition (stdout):\n{stdout}")
+            logger.debug(
+                f"Output of command condition of rule '{self.rule_name}' (stdout):\n{stdout}"
+            )
 
         if stderr:
-            logger.debug(f"Output of command condition (stderr):\n{stderr}")
+            logger.debug(
+                f"Output of command condition of rule '{self.rule_name}' (stderr):\n{stderr}"
+            )

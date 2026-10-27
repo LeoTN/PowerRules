@@ -75,24 +75,34 @@ class CommandAction:
         self.files_verifier = files_verifier
         self.stdout_matcher = stdout_matcher
         self.stderr_matcher = stderr_matcher
-        self.runner = CommandRunner(
-            command_provider=command_provider,
-            command=command,
-            working_directory=working_directory,
-            timeout=timeout,
-            shell=shell,
+
+    def _create_runner(self) -> CommandRunner:
+        """Create the runner for one execution of the action from the current settings of the action.
+
+        The runner is created for every execution on purpose: The action is the only owner of its settings,
+        so the runner can never use a value which differs from the one of the action.
+
+        Returns:
+            The runner for the command of the action.
+        """
+        return CommandRunner(
+            command_provider=self.command_provider,
+            command=self.command,
+            working_directory=self.working_directory,
+            timeout=self.timeout,
+            shell=self.shell,
             # The variables of PowerRules come last, the configuration cannot define them
             environment={
                 **self.environment,
-                RULE_NAME_ENVIRONMENT_VARIABLE: rule_name,
-                ACTION_NAME_ENVIRONMENT_VARIABLE: name,
+                RULE_NAME_ENVIRONMENT_VARIABLE: self.rule_name,
+                ACTION_NAME_ENVIRONMENT_VARIABLE: self.name,
             },
             success_exit_codes=self.success_exit_codes,
-            wait=wait,
-            stdout_matcher=stdout_matcher,
-            stderr_matcher=stderr_matcher,
+            wait=self.wait,
+            stdout_matcher=self.stdout_matcher,
+            stderr_matcher=self.stderr_matcher,
             trusted_files=self.trusted_files,
-            files_verifier=files_verifier,
+            files_verifier=self.files_verifier,
         )
 
     def execute(self) -> None:
@@ -129,9 +139,11 @@ class CommandAction:
             ActionExecutionError: If the command cannot be started, exceeds the timeout,
                 finishes with an exit code which does not count as success or produces an unexpected output.
         """
+        runner = self._create_runner()
+
         # TimeoutError is a subclass of OSError, so it has to be handled first
         try:
-            outcome = self.runner.run()
+            outcome = runner.run()
         except TimeoutError as e:
             raise ActionExecutionError(
                 f"Action '{self.name}' timed out after {self.timeout:g} seconds"
@@ -148,12 +160,8 @@ class CommandAction:
         self._log_output(outcome.result, failed=not outcome.matched)
 
         if not outcome.exit_code_matched:
-            expected_exit_codes = ", ".join(
-                str(exit_code) for exit_code in sorted(self.success_exit_codes)
-            )
-
             raise ActionExecutionError(
-                f"Action '{self.name}' returned exit code {outcome.result.exit_code}, expected one of: {expected_exit_codes}"
+                f"Action '{self.name}' returned exit code {outcome.result.exit_code}, expected one of: {runner.describe_success_exit_codes()}"
             )
 
         # The message names only the stream, the output itself might contain secrets
