@@ -5,9 +5,10 @@ import pytest
 
 from powerrules.actions.command import (
     ACTION_NAME_ENVIRONMENT_VARIABLE,
-    DEFAULT_ACTION_TIMEOUT_SECONDS,
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
     RULE_NAME_ENVIRONMENT_VARIABLE,
 )
+from powerrules.conditions.matcher import MatchType, StringMatcher
 from powerrules.engine.exceptions import ActionExecutionError, FileIntegrityError
 from powerrules.providers.command import CommandRequest, CommandResult, Shell
 from tests.factories import (
@@ -29,7 +30,7 @@ FAILURE_CASES = [
     pytest.param(
         CommandResult(exit_code=1),
         None,
-        "Action 'Test action' returned exit code 1, expected one of: 0",
+        "Action 'Test action' returned exit code 1, expected one of: 0 (use '--log-level DEBUG' to see the output)",
         id="exit-code",
     ),
     # TimeoutError is a subclass of OSError and must not be reported as a start failure
@@ -67,7 +68,7 @@ def test_command_action_runs_command_with_default_request() -> None:
                 RULE_NAME_ENVIRONMENT_VARIABLE: "Test rule",
                 ACTION_NAME_ENVIRONMENT_VARIABLE: "Test action",
             },
-            timeout=DEFAULT_ACTION_TIMEOUT_SECONDS,
+            timeout=DEFAULT_COMMAND_TIMEOUT_SECONDS,
             wait=True,
             shell=None,
         )
@@ -199,8 +200,119 @@ def test_command_action_lists_sorted_success_exit_codes_in_error() -> None:
         action.execute()
 
     assert str(exc_info.value) == (
-        "Action 'Test action' returned exit code 2, expected one of: 0, 3"
+        "Action 'Test action' returned exit code 2, expected one of: 0, 3 (use '--log-level DEBUG' to see the output)"
     )
+
+
+##########################
+# Output expectation tests
+##########################
+
+
+def test_command_action_accepts_expected_output() -> None:
+    command_provider = make_command_provider(
+        CommandResult(exit_code=0, stdout="  active\n", stderr="a warning\n")
+    )
+    action = make_command_action(
+        command_provider,
+        stdout_matcher=StringMatcher("active"),
+        stderr_matcher=StringMatcher("warning", MatchType.CONTAINS),
+    )
+
+    # The output is stripped before it is compared
+    action.execute()
+
+    command_provider.run.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("stream", "result"),
+    [
+        ("stdout", CommandResult(exit_code=0, stdout="inactive secret\n")),
+        ("stderr", CommandResult(exit_code=0, stderr="inactive secret\n")),
+    ],
+)
+def test_command_action_rejects_unexpected_output(
+    stream: str,
+    result: CommandResult,
+) -> None:
+    action = make_command_action(
+        make_command_provider(result),
+        stdout_matcher=StringMatcher("active") if stream == "stdout" else None,
+        stderr_matcher=StringMatcher("active") if stream == "stderr" else None,
+    )
+
+    with pytest.raises(ActionExecutionError) as exc_info:
+        action.execute()
+
+    # The message names the stream, but never the output which might contain secrets
+    assert str(exc_info.value) == (
+        f"Action 'Test action' produced an unexpected output on {stream} (use '--log-level DEBUG' to see the output)"
+    )
+    assert "secret" not in str(exc_info.value)
+
+
+def test_command_action_reports_exit_code_before_unexpected_output() -> None:
+    action = make_command_action(
+        make_command_provider(CommandResult(exit_code=1, stdout="inactive")),
+        stdout_matcher=StringMatcher("active"),
+    )
+
+    with pytest.raises(ActionExecutionError, match="returned exit code 1"):
+        action.execute()
+
+
+def test_command_action_continues_on_unexpected_output_when_configured(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    action = make_command_action(
+        make_command_provider(CommandResult(exit_code=0, stdout="inactive")),
+        stdout_matcher=StringMatcher("active"),
+        continue_on_error=True,
+    )
+
+    with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
+        action.execute()
+
+    assert (
+        logging.WARNING,
+        "Action 'Test action' produced an unexpected output on stdout (use '--log-level DEBUG' to see the output) (continue_on_error is set, continuing with the remaining actions)",
+    ) in get_log_entries(caplog, LOGGER_NAME)
+
+
+def test_command_action_logs_error_output_only_on_debug_level_after_unexpected_output(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    action = make_command_action(
+        make_command_provider(
+            CommandResult(exit_code=0, stdout="inactive", stderr="err\n")
+        ),
+        stdout_matcher=StringMatcher("active"),
+    )
+
+    with (
+        caplog.at_level(logging.DEBUG, logger=LOGGER_NAME),
+        pytest.raises(ActionExecutionError),
+    ):
+        action.execute()
+
+    logged = get_log_entries(caplog, LOGGER_NAME)
+    assert (logging.DEBUG, "Output of action 'Test action' (stderr):\nerr") in logged
+    assert not any(level >= logging.WARNING for level, _ in logged)
+
+
+def test_command_action_does_not_compare_output_when_not_waiting() -> None:
+    command_provider = make_command_provider(CommandResult(exit_code=None))
+    action = make_command_action(
+        command_provider,
+        wait=False,
+        stdout_matcher=StringMatcher("active"),
+        stderr_matcher=StringMatcher("active"),
+    )
+
+    action.execute()
+
+    command_provider.run.assert_called_once()
 
 
 ######################
@@ -355,7 +467,7 @@ def test_command_action_logs_output_on_debug_level_after_success(
     assert not any(level >= logging.WARNING for level, _ in logged)
 
 
-def test_command_action_logs_error_output_as_error_after_failure(
+def test_command_action_logs_output_only_on_debug_level_after_failure(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     action = make_command_action(
@@ -372,7 +484,8 @@ def test_command_action_logs_error_output_as_error_after_failure(
 
     logged = get_log_entries(caplog, LOGGER_NAME)
     assert (logging.DEBUG, "Output of action 'Test action' (stdout):\nout") in logged
-    assert (logging.ERROR, "Output of action 'Test action' (stderr):\nerr") in logged
+    assert (logging.DEBUG, "Output of action 'Test action' (stderr):\nerr") in logged
+    assert not any(level >= logging.WARNING for level, _ in logged)
 
 
 def test_command_action_does_not_log_empty_output(

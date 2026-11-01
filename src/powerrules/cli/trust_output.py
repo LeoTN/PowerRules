@@ -117,12 +117,15 @@ def report_trust(report: TrustReport, always_show_table: bool = False) -> None:
 
 
 def create_trust_checker(
-    require_trust: bool, always_show_table: bool = False
+    require_trust_for_actions: bool,
+    require_trust_for_conditions: bool,
+    always_show_table: bool = False,
 ) -> PolicyTrustChecker:
     """Create a checker which verifies policies against the trust store of the current user and reports the result."""
     return PolicyTrustChecker(
         TrustStore(),
-        require_trust=require_trust,
+        require_trust_for_actions=require_trust_for_actions,
+        require_trust_for_conditions=require_trust_for_conditions,
         reporter=partial(report_trust, always_show_table=always_show_table),
         trust_command_builder=build_trust_command,
     )

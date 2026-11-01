@@ -75,6 +75,23 @@ rules:
       - run: "echo sleep"
 """
 
+# The command of a condition runs even in a dry run, so the policy has to be trusted first.
+# The command is harmless and behaves the same in PowerShell and sh
+COMMAND_CONDITION_POLICY = """
+rules:
+  - name: "Smoke test command condition"
+    conditions:
+      command:
+        run: "echo powerrules-smoke-test"
+        stdout:
+          value: "powerrules-smoke-test"
+          match:
+            type: contains
+    actions:
+      - name: "Never run"
+        run: "echo never"
+"""
+
 # The following policies run real commands. They behave the same in PowerShell and sh and never change the machine
 REAL_COMMAND_POLICY = """
 rules:
@@ -347,6 +364,48 @@ SCENARIOS = (
         name="trust remove",
         arguments=("trust", "remove", "--policy", POLICY_PLACEHOLDER),
         policy=REAL_COMMAND_POLICY,
+        expected_output=("is no longer trusted",),
+    ),
+    # The following scenarios depend on each other: rejected, trusted, run, untrusted
+    SmokeScenario(
+        name="dry run with untrusted command condition",
+        arguments=(
+            "policy",
+            "run",
+            "--once",
+            "--dry-run",
+            "--policy",
+            POLICY_PLACEHOLDER,
+        ),
+        policy=COMMAND_CONDITION_POLICY,
+        expected_exit_codes=frozenset({EXIT_POLICY_TRUST_ERROR}),
+        expected_output=("trust add --policy",),
+    ),
+    SmokeScenario(
+        name="trust add command condition policy",
+        arguments=("trust", "add", "--policy", POLICY_PLACEHOLDER),
+        policy=COMMAND_CONDITION_POLICY,
+        expected_output=("is now trusted",),
+    ),
+    SmokeScenario(
+        name="dry run with trusted command condition",
+        arguments=(
+            "policy",
+            "run",
+            "--once",
+            "--dry-run",
+            "--policy",
+            POLICY_PLACEHOLDER,
+        ),
+        policy=COMMAND_CONDITION_POLICY,
+        expected_output=(
+            "[DRY RUN] Rule 'Smoke test command condition' matched, would have executed actions: 'Never run'",
+        ),
+    ),
+    SmokeScenario(
+        name="trust remove command condition policy",
+        arguments=("trust", "remove", "--policy", POLICY_PLACEHOLDER),
+        policy=COMMAND_CONDITION_POLICY,
         expected_output=("is no longer trusted",),
     ),
 )

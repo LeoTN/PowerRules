@@ -1,4 +1,6 @@
+import logging
 import platform
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -21,6 +23,11 @@ from powerrules.providers.process import ProcessProvider
 from powerrules.providers.window import WindowProvider
 from powerrules.trust.checker import PolicyTrustChecker
 
+logger = logging.getLogger(__name__)
+
+# Delay between two evaluations of a policy in seconds
+DEFAULT_EVALUATION_INTERVAL_SECONDS = 10.0
+
 
 def describe_actions(rule: Rule) -> str:
     """Return a human-readable list of the actions of a rule.
@@ -32,6 +39,23 @@ def describe_actions(rule: Rule) -> str:
         The quoted names of the actions separated by commas (e.g. "'Cleanup', 'Shutdown'").
     """
     return ", ".join(f"'{action.name}'" for action in rule.actions)
+
+
+def validate_evaluation_interval(evaluation_interval: float) -> None:
+    """Validate the delay between two evaluations of a policy.
+
+    Args:
+        evaluation_interval: Delay between evaluations in seconds.
+
+    Raises:
+        ValueError: If the interval is not greater than zero or too large to be waited for.
+    """
+    # The comparison is written as a positive chain on purpose: every comparison with NaN is False, so NaN is rejected as well.
+    # Infinity exceeds the maximum. The maximum is the largest wait time the platform supports, a larger value would make "time.sleep()" fail
+    if not 0 < evaluation_interval <= threading.TIMEOUT_MAX:
+        raise ValueError(
+            f"Evaluation interval must be greater than zero and at most {threading.TIMEOUT_MAX:.0f} seconds"
+        )
 
 
 class PowerRulesRuntime:
@@ -75,7 +99,7 @@ class PowerRulesRuntime:
     def run_continuously(
         self,
         configuration_path: Path,
-        evaluation_interval: float = 10.0,
+        evaluation_interval: float = DEFAULT_EVALUATION_INTERVAL_SECONDS,
         stop_on_match: bool = False,
         dry_run: bool = False,
     ) -> Iterator[RuleEvaluationResult]:
@@ -87,9 +111,12 @@ class PowerRulesRuntime:
         The returned iterator yields the result of every evaluation, so the caller can react to matches (e.g. for logging) as they happen.
         If "stop_on_match" is True, the iterator stops right after yielding a result whose action was triggered.
 
+        The interval is the delay between the starts of two evaluations. Only the time which is left after an evaluation is waited for.
+        If an evaluation takes longer than the interval, a warning is logged and the next evaluation starts immediately.
+
         Args:
             configuration_path: Path to the PowerRules policy file.
-            evaluation_interval: Delay between evaluations in seconds.
+            evaluation_interval: Delay between the starts of two evaluations in seconds.
             stop_on_match: Stop the evaluation once a rule's action is triggered.
             dry_run: If True, find the matching rule but do not execute its action.
 
@@ -97,8 +124,8 @@ class PowerRulesRuntime:
             An iterator yielding the result of every evaluation.
 
         Raises:
-            ValueError: If the evaluation interval is less than or equal to zero.
-                Raised immediately, before any evaluation takes place.
+            ValueError: If the evaluation interval is not greater than zero or too large to be waited for,
+                see "validate_evaluation_interval()". Raised immediately, before any evaluation takes place.
             ConditionEvaluationError: If a condition cannot be evaluated. Raised while iterating.
             ActionExecutionError: If a matching action cannot be executed. Raised while iterating.
             PolicyNotTrustedError: If trust is required and the policy is not trusted.
@@ -107,8 +134,7 @@ class PowerRulesRuntime:
                 Raised immediately, before any evaluation takes place.
             FileIntegrityError: If trust is required and a trusted file cannot be read, is not trusted yet or was modified.
         """
-        if evaluation_interval <= 0:
-            raise ValueError("Evaluation interval must be greater than zero")
+        validate_evaluation_interval(evaluation_interval)
 
         # The policy is loaded and validated as soon as this method is called, not deferred until the first iteration
         rule_engine = self._build_rule_engine(configuration_path)
@@ -131,7 +157,7 @@ class PowerRulesRuntime:
 
         Args:
             rule_engine: The rule engine to evaluate.
-            evaluation_interval: Delay between evaluations in seconds.
+            evaluation_interval: Delay between the starts of two evaluations in seconds.
             stop_on_match: Stop the evaluation once a rule's action is triggered.
             dry_run: If True, report matching rules instead of executing their actions.
 
@@ -145,6 +171,9 @@ class PowerRulesRuntime:
         last_matched_rule: Rule | None = None
 
         while True:
+            # A monotonic clock is not affected by changes of the system time (e.g. daylight saving time or clock synchronization)
+            started_at = time.monotonic()
+
             result = rule_engine.evaluate(
                 previous_matched_rule=last_matched_rule,
                 dry_run=dry_run,
@@ -156,7 +185,16 @@ class PowerRulesRuntime:
             if result.action_triggered and stop_on_match:
                 return
 
-            time.sleep(evaluation_interval)
+            # The work of the caller while the iterator was suspended (e.g. logging) counts as well
+            remaining_time = evaluation_interval - (time.monotonic() - started_at)
+
+            if remaining_time <= 0:
+                logger.warning(
+                    f"Evaluation took longer than the interval of {evaluation_interval:g} seconds, starting the next one immediately"
+                )
+                continue
+
+            time.sleep(remaining_time)
 
     def _build_rule_engine(self, configuration_path: Path) -> RuleEngine:
         """Build a rule engine from a policy file.
@@ -189,6 +227,12 @@ class PowerRulesRuntime:
             if self.trust_checker is not None
             else None
         )
+        # Same for the command conditions, which have their own trust requirement
+        condition_files_verifier = (
+            partial(self.trust_checker.verify_condition_files, policy_path)
+            if self.trust_checker is not None
+            else None
+        )
 
         rule_set = ConfigurationBuilder(
             # Information about the current date and time
@@ -197,11 +241,12 @@ class PowerRulesRuntime:
             process_provider=providers.process,
             # Information about windows (not the OS :D)
             window_provider=providers.window,
-            # Runs the commands of the actions
+            # Runs the commands of the actions and the command conditions
             command_provider=providers.command,
             # Commands run in the directory of the policy by default, no matter where PowerRules was started
             base_directory=policy_path.parent,
             files_verifier=files_verifier,
+            condition_files_verifier=condition_files_verifier,
         ).build(configuration)
 
         return RuleEngine(rule_set.rules)

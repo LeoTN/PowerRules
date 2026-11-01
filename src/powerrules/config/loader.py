@@ -51,6 +51,7 @@ class ConfigurationLoader:
                 resolve_trusted_files(
                     resolved_path.parent, configuration.get_trusted_files()
                 ),
+                has_command_conditions=configuration.has_command_condition(),
             )
 
         return configuration
