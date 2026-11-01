@@ -19,6 +19,9 @@ RESERVED_ENVIRONMENT_PREFIX = "POWERRULES_"
 RULE_NAME_ENVIRONMENT_VARIABLE = "POWERRULES_RULE_NAME"
 ACTION_NAME_ENVIRONMENT_VARIABLE = "POWERRULES_ACTION_NAME"
 
+# Appended to errors of finished commands, because their output is only logged on debug level
+_OUTPUT_HINT = "use '--log-level DEBUG' to see the output"
+
 
 class CommandAction:
     def __init__(
@@ -157,11 +160,11 @@ class CommandAction:
             logger.info(f"Started action '{self.name}' in the background")
             return
 
-        self._log_output(outcome.result, failed=not outcome.matched)
+        self._log_output(outcome.result)
 
         if not outcome.exit_code_matched:
             raise ActionExecutionError(
-                f"Action '{self.name}' returned exit code {outcome.result.exit_code}, expected one of: {runner.describe_success_exit_codes()}"
+                f"Action '{self.name}' returned exit code {outcome.result.exit_code}, expected one of: {runner.describe_success_exit_codes()} ({_OUTPUT_HINT})"
             )
 
         # The message names only the stream, the output itself might contain secrets
@@ -171,20 +174,20 @@ class CommandAction:
         ):
             if not is_matched:
                 raise ActionExecutionError(
-                    f"Action '{self.name}' produced an unexpected output on {stream}"
+                    f"Action '{self.name}' produced an unexpected output on {stream} ({_OUTPUT_HINT})"
                 )
 
         logger.info(
             f"Action '{self.name}' finished with exit code {outcome.result.exit_code}"
         )
 
-    def _log_output(self, result: CommandResult, failed: bool) -> None:
-        """Log the output of the command.
+    def _log_output(self, result: CommandResult) -> None:
+        """Log the output of the command on debug level.
+
+        The output is never logged on a higher level, because it might contain secrets.
 
         Args:
             result: Result of the command.
-            failed: Whether the command failed. The error output of a failed command is logged as an error,
-                otherwise on debug level, because many programs write their progress to it.
         """
         stdout = result.stdout.strip()
         stderr = result.stderr.strip()
@@ -193,7 +196,4 @@ class CommandAction:
             logger.debug(f"Output of action '{self.name}' (stdout):\n{stdout}")
 
         if stderr:
-            logger.log(
-                logging.ERROR if failed else logging.DEBUG,
-                f"Output of action '{self.name}' (stderr):\n{stderr}",
-            )
+            logger.debug(f"Output of action '{self.name}' (stderr):\n{stderr}")

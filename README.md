@@ -471,7 +471,7 @@ All `policy` and `trust` commands accept the following logging options:
 pwru policy run --log-level DEBUG --log-file my-log.log
 ```
 
-Messages are shown on the console and written to a rotating log file. Commands of actions or command conditions and their output are only logged on `DEBUG` level. The error output of a failed action is always logged as an error.
+Messages are shown on the console and written to a rotating log file. Commands of actions or command conditions and their output are only logged on `DEBUG` level.
 
 <details>
   <summary><b>Options reference</b></summary><br>

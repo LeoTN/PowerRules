@@ -30,7 +30,7 @@ FAILURE_CASES = [
     pytest.param(
         CommandResult(exit_code=1),
         None,
-        "Action 'Test action' returned exit code 1, expected one of: 0",
+        "Action 'Test action' returned exit code 1, expected one of: 0 (use '--log-level DEBUG' to see the output)",
         id="exit-code",
     ),
     # TimeoutError is a subclass of OSError and must not be reported as a start failure
@@ -200,7 +200,7 @@ def test_command_action_lists_sorted_success_exit_codes_in_error() -> None:
         action.execute()
 
     assert str(exc_info.value) == (
-        "Action 'Test action' returned exit code 2, expected one of: 0, 3"
+        "Action 'Test action' returned exit code 2, expected one of: 0, 3 (use '--log-level DEBUG' to see the output)"
     )
 
 
@@ -247,7 +247,7 @@ def test_command_action_rejects_unexpected_output(
 
     # The message names the stream, but never the output which might contain secrets
     assert str(exc_info.value) == (
-        f"Action 'Test action' produced an unexpected output on {stream}"
+        f"Action 'Test action' produced an unexpected output on {stream} (use '--log-level DEBUG' to see the output)"
     )
     assert "secret" not in str(exc_info.value)
 
@@ -276,11 +276,11 @@ def test_command_action_continues_on_unexpected_output_when_configured(
 
     assert (
         logging.WARNING,
-        "Action 'Test action' produced an unexpected output on stdout (continue_on_error is set, continuing with the remaining actions)",
+        "Action 'Test action' produced an unexpected output on stdout (use '--log-level DEBUG' to see the output) (continue_on_error is set, continuing with the remaining actions)",
     ) in get_log_entries(caplog, LOGGER_NAME)
 
 
-def test_command_action_logs_error_output_as_error_after_unexpected_output(
+def test_command_action_logs_error_output_only_on_debug_level_after_unexpected_output(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     action = make_command_action(
@@ -296,10 +296,9 @@ def test_command_action_logs_error_output_as_error_after_unexpected_output(
     ):
         action.execute()
 
-    assert (
-        logging.ERROR,
-        "Output of action 'Test action' (stderr):\nerr",
-    ) in get_log_entries(caplog, LOGGER_NAME)
+    logged = get_log_entries(caplog, LOGGER_NAME)
+    assert (logging.DEBUG, "Output of action 'Test action' (stderr):\nerr") in logged
+    assert not any(level >= logging.WARNING for level, _ in logged)
 
 
 def test_command_action_does_not_compare_output_when_not_waiting() -> None:
@@ -468,7 +467,7 @@ def test_command_action_logs_output_on_debug_level_after_success(
     assert not any(level >= logging.WARNING for level, _ in logged)
 
 
-def test_command_action_logs_error_output_as_error_after_failure(
+def test_command_action_logs_output_only_on_debug_level_after_failure(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     action = make_command_action(
@@ -485,7 +484,8 @@ def test_command_action_logs_error_output_as_error_after_failure(
 
     logged = get_log_entries(caplog, LOGGER_NAME)
     assert (logging.DEBUG, "Output of action 'Test action' (stdout):\nout") in logged
-    assert (logging.ERROR, "Output of action 'Test action' (stderr):\nerr") in logged
+    assert (logging.DEBUG, "Output of action 'Test action' (stderr):\nerr") in logged
+    assert not any(level >= logging.WARNING for level, _ in logged)
 
 
 def test_command_action_does_not_log_empty_output(
