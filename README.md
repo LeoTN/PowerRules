@@ -252,7 +252,7 @@ Match rules based on the result of a command. The condition is satisfied if the 
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `run` | required | Command to run. A command with several lines stops at the first failing line. |
+| `run` | required | Command to run. A command with several lines stops at the first failing line (`cmd` only supports a single line, chain commands with `&&` instead). |
 | `shell` | `powershell` on Windows, `sh` on Linux and macOS | One of `sh`, `bash`, `cmd`, `powershell` or `pwsh`. The shell has to be installed. |
 | `working_directory` | directory of the policy file | Relative paths are resolved against the directory of the policy file. |
 | `env` | none | Additional environment variables. Numbers and booleans are converted to strings. Names starting with `POWERRULES_` are reserved. |
@@ -331,7 +331,7 @@ actions:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `run` | required | Command to run. A command with several lines stops at the first failing line. |
+| `run` | required | Command to run. A command with several lines stops at the first failing line (`cmd` only supports a single line, chain commands with `&&` instead). |
 | `name` | `Action N of M` | Name of the action, used in log messages. |
 | `shell` | `powershell` on Windows, `sh` on Linux and macOS | One of `sh`, `bash`, `cmd`, `powershell` or `pwsh`. The shell has to be installed. |
 | `working_directory` | directory of the policy file | Relative paths are resolved against the directory of the policy file. |

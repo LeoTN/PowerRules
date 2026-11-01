@@ -369,6 +369,25 @@ class CommandConfiguration(BaseModel):
 
         return value
 
+    @model_validator(mode="after")
+    def validate_cmd_command_is_single_line(self) -> "CommandConfiguration":
+        """Validate that a command for "cmd" has only one line.
+
+        "cmd.exe /c" ignores everything after the first line break, so further lines would be skipped silently.
+
+        Returns:
+            The validated configuration.
+
+        Raises:
+            ValueError: If the shell is "cmd" and the command has several lines.
+        """
+        if self.shell is Shell.CMD and len(self.run.strip().splitlines()) > 1:
+            raise ValueError(
+                "A command for the shell 'cmd' must be a single line, because cmd.exe ignores all following lines (chain commands with '&&' or '&' instead)"
+            )
+
+        return self
+
     @field_validator("working_directory", mode="before")
     @classmethod
     def validate_working_directory_not_blank(cls, value: object) -> object:

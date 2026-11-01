@@ -1363,6 +1363,31 @@ def test_command_condition_configuration_validates_shared_options(
         CommandConditionConfiguration.model_validate({"run": "echo test", **option})
 
 
+def test_command_condition_configuration_rejects_multi_line_cmd_command() -> None:
+    with pytest.raises(
+        ValidationError, match="A command for the shell 'cmd' must be a single line"
+    ):
+        make_action_configuration(shell="cmd", run="echo a\necho b")
+
+
+@pytest.mark.parametrize(
+    ("shell", "command"),
+    [
+        # A trailing line break (e.g. of a YAML block scalar) is no second line
+        ("cmd", "echo test\n"),
+        ("cmd", "echo a && echo b"),
+        # Only cmd ignores everything after the first line break
+        ("bash", "echo a\necho b"),
+        (None, "echo a\necho b"),
+    ],
+)
+def test_command_configuration_accepts_valid_cmd_usage(
+    shell: str | None,
+    command: str,
+) -> None:
+    assert make_action_configuration(run=command, shell=shell).run == command
+
+
 # YAML ".inf" is a float which cannot be passed on as a wait time, so it means "no time limit"
 def test_timeout_infinity_is_normalized_to_no_time_limit() -> None:
     action = make_action_configuration(timeout=float("inf"))
