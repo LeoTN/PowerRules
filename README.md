@@ -97,21 +97,21 @@ Match rules based on processes and window titles.
 | `name` | `process` | required | Name of the process to check. |
 | `title` | `window` | required | Title of the window to check. |
 | `exists` | both | required | Whether the process or window is expected to exist. |
-| `match` | both | exact, case-sensitive | How the name or title is matched, see [Regex Matching](#regex-matching). |
+| `match` | both | exact, case-sensitive | How the name or title is matched, see [Match Types](#match-types). |
 
 </details>
 
-### Regex Matching
+### Match Types
 
-Match process names and window titles using regular expressions with full-string matching.
+Match process names, window titles and command output using exact text, regular expressions or a part of the text. Regular expressions use full-string matching.
 
 ```yaml
 # Match if process name contains "fire"
 - process:
-    name: '.*fire.*'
+    name: "fire"
     exists: true
     match:
-      type: regex
+      type: contains
       case_sensitive: true # This is the default behavior
 
 # Match if window title starts with "firefox" (case insensitive)
@@ -123,6 +123,8 @@ Match process names and window titles using regular expressions with full-string
       case_sensitive: false
 ```
 
+A `.` in a regular expression also matches line breaks, so patterns work on multi-line output.
+
 <details>
   <summary><b>Options reference</b></summary><br>
 
@@ -130,7 +132,7 @@ Options of `match`:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `type` | `exact` | Matching mode: `exact` or `regex` (full-string match). |
+| `type` | `exact` | Matching mode: `exact`, `regex` (full-string match) or `contains` (part of the text). |
 | `case_sensitive` | `true` | Whether uppercase and lowercase letters should be treated differently. |
 
 </details>
@@ -219,6 +221,57 @@ Kinds of `between`:
 
 </details>
 
+### Command Conditions
+
+Match rules based on the result of a command. The condition is satisfied if the exit code counts as success and the output matches.
+
+```yaml
+# Match if nginx is active
+- command:
+    run: "systemctl is-active nginx"
+    shell: bash
+    timeout: 5
+
+# Match if the script exits with 0 or 2 and prints "ready" (case insensitive)
+- command:
+    run: "check.sh"
+    shell: bash
+    working_directory: scripts # Relative to the policy file
+    success_exit_codes: [0, 2]
+    stdout:
+      value: "ready"
+      match:
+        type: contains
+        case_sensitive: false
+    trusted_files:
+      - scripts/check.sh # Relative to the policy file (not to working_directory)
+```
+
+<details>
+  <summary><b>Options reference</b></summary><br>
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `run` | required | Command to run. A command with several lines stops at the first failing line. |
+| `shell` | `powershell` on Windows, `sh` on Linux and macOS | One of `sh`, `bash`, `cmd`, `powershell` or `pwsh`. The shell has to be installed. |
+| `working_directory` | directory of the policy file | Relative paths are resolved against the directory of the policy file. |
+| `env` | none | Additional environment variables. Numbers and booleans are converted to strings. Names starting with `POWERRULES_` are reserved. |
+| `timeout` | `60` | Maximum run time in seconds. Afterwards, the command and its child processes are terminated. `null` or `.inf` disables the limit. |
+| `success_exit_codes` | `[0]` | Exit codes which count as success. |
+| `stdout`, `stderr` | none | Expected output of the command. A different output counts as a failure. |
+| `trusted_files` | none | Files (e.g. scripts) the command depends on. They are verified before every run, see [Trust](#trust). Relative paths are resolved against the directory of the policy file. |
+
+All of `success_exit_codes`, `stdout` and `stderr` have to match. The output is compared after leading and trailing whitespace was removed.
+
+</details>
+
+<br>
+
+If the command cannot be started or exceeds its `timeout`, the condition cannot be evaluated and the evaluation stops.
+
+> [!WARNING]
+> Command conditions are always executed, **even with `--dry-run`**. Use [Trust](#trust) to detect modifications.
+
 ### Logical Conditions
 
 Combine multiple conditions using `and`, `or`, and `not`.
@@ -252,6 +305,15 @@ actions:
     trusted_files:
       - scripts/backup.sh # Relative to the policy file (not to working_directory)
 
+  # Fail if the output does not contain "success"
+  - name: "Check"
+    run: "check.sh"
+    shell: bash
+    stdout:
+      value: "success"
+      match:
+        type: contains
+
   # Start a command in the background without waiting for it
   - run: "notify.sh"
     shell: bash
@@ -274,17 +336,31 @@ actions:
 | `shell` | `powershell` on Windows, `sh` on Linux and macOS | One of `sh`, `bash`, `cmd`, `powershell` or `pwsh`. The shell has to be installed. |
 | `working_directory` | directory of the policy file | Relative paths are resolved against the directory of the policy file. |
 | `env` | none | Additional environment variables. Numbers and booleans are converted to strings. Names starting with `POWERRULES_` are reserved. |
-| `timeout` | `60` | Maximum run time in seconds. Afterwards, the command and its child processes are terminated. `null` disables the limit. |
+| `timeout` | `60` | Maximum run time in seconds. Afterwards, the command and its child processes are terminated. `null` or `.inf` disables the limit. |
 | `success_exit_codes` | `[0]` | Exit codes which count as success. |
-| `wait` | `true` | `false` starts the command in the background. Cannot be combined with `timeout` or `success_exit_codes`. |
+| `stdout`, `stderr` | none | Expected output of the command. A different output counts as a failure. |
+| `wait` | `true` | `false` starts the command in the background. Cannot be combined with `timeout`, `success_exit_codes`, `stdout` or `stderr`. |
 | `continue_on_error` | `false` | Whether the remaining actions still run if this action fails. |
 | `trusted_files` | none | Files (e.g. scripts) the command depends on. They are verified before every run, see [Trust](#trust). Relative paths are resolved against the directory of the policy file. |
 
+<br>
+
+Options of `stdout` and `stderr`:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `value` | required | Text or regular expression the output is compared with. |
+| `match` | exact, case-sensitive | How the output is matched, see [Match Types](#match-types). |
+
+The output is compared after leading and trailing whitespace was removed.
+
 </details>
+
+<br>
 
 Commands can read the name of their rule and action from the environment variables `POWERRULES_RULE_NAME` and `POWERRULES_ACTION_NAME`.
 
-If an action fails (unexpected exit code, timeout or the command cannot be started), the remaining actions are skipped unless `continue_on_error` is set.
+If an action fails (unexpected exit code or output, timeout or the command cannot be started), the remaining actions are skipped unless `continue_on_error` is set.
 
 > [!WARNING]
 > Commands run with the privileges of the user who started PowerRules, so treat policy files like scripts. Use [Trust](#trust) to detect modifications.
@@ -297,14 +373,19 @@ Evaluate a policy with `pwru policy run`. Without `--once`, the rules are evalua
 # Evaluate continuously
 pwru policy run
 
+# Evaluate every 30 seconds
+pwru policy run --interval 30
+
 # Evaluate once and exit
 pwru policy run --once
 
-# Only report which rule would match without running any commands
+# Only report which rule would match without running any actions
 pwru policy run --dry-run
 ```
 
-The policy is loaded once at startup, so changes to the file require a restart. Unless `--dry-run` or `--no-require-trust` is used, the policy has to be [trusted](#trust). If a condition cannot be evaluated, an action fails or a trusted file was modified, the evaluation stops.
+The interval is the time between the starts of two evaluations. If an evaluation takes longer, PowerRules logs a warning and starts the next one immediately.
+
+The policy is loaded once at startup, so changes to the file require a restart. Unless `--no-require-trust` is used, the policy has to be [trusted](#trust). `--dry-run` only skips this if the policy has no [command condition](#command-conditions), because the commands of conditions run in a dry run as well. If a condition cannot be evaluated, an action fails or a trusted file was modified, the evaluation stops.
 
 <details>
   <summary><b>Options reference</b></summary><br>
@@ -313,15 +394,16 @@ The policy is loaded once at startup, so changes to the file require a restart. 
 |--------|------------|---------|-------------|
 | `--policy`, `-p` | all `policy` commands, `trust add`, `trust remove` | `powerrules.yaml` | Path to the PowerRules policy file. |
 | `--once` | `policy run` | off | Evaluate the policy once and then exit. |
+| `--interval` | `policy run` | `10` | Seconds between the starts of two evaluations. Has no effect with `--once`. |
 | `--stop-on-match` | `policy run` | off | Keep evaluating until the first rule matches, then stop. |
-| `--dry-run` | `policy run` | off | Evaluate the policy without executing any matching action. |
+| `--dry-run` | `policy run` | off | Evaluate the policy without executing any matching action. The commands of conditions still run. |
 | `--no-require-trust` | `policy run` | off | Run the policy even if it is not trusted or was modified since it was trusted, see [Trust](#trust). |
 
 </details>
 
 ### Trust
 
-PowerRules remembers which policies you trust. A policy is identified by its path and trusted by its content (SHA-256 hash). Every modification makes it untrusted until you review it and trust it again. Files which actions depend on (e.g. scripts or executables) are not detected automatically. To cover them as well, you can list them in the action's `trusted_files` configuration.
+PowerRules remembers which policies you trust. A policy is identified by its path and trusted by its content (SHA-256 hash). Every modification makes it untrusted until you review it and trust it again. Files which actions or command conditions depend on (e.g. scripts or executables) are not detected automatically. To cover them as well, you can list them in the `trusted_files` configuration.
 
 ```bash
 # Trust the current content of a policy and its trusted files
@@ -347,9 +429,9 @@ actions:
       - scripts/backup.sh # Relative to the policy file (not to working_directory)
 ```
 
-`pwru policy run` refuses to run untrusted policies by default. `--no-require-trust` can be used to override this behaviour.
+`pwru policy run` refuses to run untrusted policies by default. `--no-require-trust` can be used to override this behaviour. `--dry-run` skips the check, unless the policy contains a [command condition](#command-conditions).
 
-The policy and its trusted files are checked when the policy is loaded. Right before an action runs, its `trusted_files` are checked again. The trust store is saved in `~/.powerrules/trust.json`.
+The policy and its trusted files are checked when the policy is loaded. Right before an action or a command condition runs, its `trusted_files` are checked again. The trust store is saved in `~/.powerrules/trust.json`.
 
 <details>
   <summary><b>Options reference</b></summary><br>
@@ -376,6 +458,8 @@ A policy only counts as trusted if the policy and all of its trusted files are t
 
 </details>
 
+<br>
+
 > [!WARNING]
 > Trust only covers the policy and its `trusted_files`. Programs started by commands are not checked and the trust store is only protected by the permissions of your user account.
 
@@ -387,7 +471,7 @@ All `policy` and `trust` commands accept the following logging options:
 pwru policy run --log-level DEBUG --log-file my-log.log
 ```
 
-Messages are shown on the console and written to a rotating log file. Commands of actions and their output are only logged on `DEBUG` level. The error output of a failed action is always logged as an error.
+Messages are shown on the console and written to a rotating log file. Commands of actions or command conditions and their output are only logged on `DEBUG` level. The error output of a failed action is always logged as an error.
 
 <details>
   <summary><b>Options reference</b></summary><br>
