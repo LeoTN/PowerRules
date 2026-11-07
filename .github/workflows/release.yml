@@ -157,6 +157,12 @@ jobs:
   build_executables:
     name: Build executable (${{ matrix.os }})
     needs: [gather_details, check_pypi, tests]
+    # https://github.com/actions/attest#usage
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     runs-on: ${{ matrix.os }}
     # Always use bash so that POSIX-style variables like $EXPECTED_VERSION work on Windows as well
     defaults:
@@ -204,6 +210,11 @@ jobs:
         with:
           name: executable-${{ matrix.os }}
           path: dist/executable/powerrules-*
+
+      - name: Attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/executable/powerrules-*
 
   build_and_publish:
     name: Build and publish package to PyPI
