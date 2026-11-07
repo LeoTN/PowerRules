@@ -1,4 +1,8 @@
 import itertools
+import logging
+import threading
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -8,122 +12,140 @@ from powerrules.application.runtime import (
     PlatformProviders,
     PowerRulesRuntime,
     get_platform_providers,
+    validate_evaluation_interval,
 )
 from powerrules.engine.exceptions import ConditionEvaluationError
-from powerrules.engine.models import Rule, RuleEvaluationResult, RuleSet
+from powerrules.engine.models import RuleEvaluationResult, RuleSet
 from powerrules.platform.clock import SystemClockProvider
-from powerrules.platform.linux.power import LinuxPowerProvider
-from powerrules.platform.macos.power import MacOSPowerProvider
+from powerrules.platform.command import SubprocessCommandProvider
 from powerrules.platform.process import PsUtilProcessProvider
-from powerrules.platform.windows.power import WindowsPowerProvider
-from powerrules.platform.windows.window import WindowsWindowProvider
-from tests.dummies import Dummy_Action, Dummy_Condition
+from powerrules.providers.command import Shell
+from tests.factories import (
+    make_monotonic_clock,
+    make_rule,
+    make_rule_engine_mock,
+    make_trust_checker,
+)
+from tests.helpers import get_log_records
+
+
+@dataclass(frozen=True)
+class _BuildMocks:
+    """The mocked collaborators of "PowerRulesRuntime._build_rule_engine()"."""
+
+    loader: Mock
+    builder: Mock
+    engine: Mock
+    rule_set: RuleSet
+
+
+@pytest.fixture
+def build_mocks() -> Iterator[_BuildMocks]:
+    """Replace the loader, the builder and the engine, so only the wiring of the runtime is tested."""
+    rule_set = RuleSet(rules=())
+
+    with (
+        patch("powerrules.application.runtime.ConfigurationLoader") as loader,
+        patch("powerrules.application.runtime.ConfigurationBuilder") as builder,
+        patch("powerrules.application.runtime.RuleEngine") as engine,
+    ):
+        loader.return_value.load.return_value = "configuration"
+        builder.return_value.build.return_value = rule_set
+
+        yield _BuildMocks(loader, builder, engine, rule_set)
+
 
 #########################
 # PowerRulesRuntime tests
 #########################
 
 
+@pytest.mark.usefixtures("patched_platform_providers")
 def test_runtime_run_once_evaluates_configuration(
     tmp_path: Path,
+    build_mocks: _BuildMocks,
 ) -> None:
-    configuration_file = tmp_path / "powerrules.yaml"
-
     expected_result = RuleEvaluationResult(matched_rule=None)
-    rule_set = RuleSet(rules=())
+    build_mocks.engine.return_value.evaluate.return_value = expected_result
 
-    # It does not really matter which platform provider is mocked here
-    providers = PlatformProviders(
-        clock=Mock(spec=SystemClockProvider),
-        process=Mock(spec=PsUtilProcessProvider),
-        window=Mock(spec=WindowsWindowProvider),
-        power=Mock(spec=WindowsPowerProvider),
-    )
-
-    with (
-        patch(
-            "powerrules.application.runtime.ConfigurationLoader",
-        ) as mock_loader,
-        patch(
-            "powerrules.application.runtime.ConfigurationBuilder",
-        ) as mock_builder,
-        patch(
-            "powerrules.application.runtime.RuleEngine",
-        ) as mock_engine,
-        patch(
-            "powerrules.application.runtime.get_platform_providers",
-            return_value=providers,
-        ),
-    ):
-        mock_loader.return_value.load.return_value = "configuration"
-        mock_builder.return_value.build.return_value = rule_set
-        mock_engine.return_value.evaluate.return_value = expected_result
-
-        result = PowerRulesRuntime().run_once(configuration_file)
+    result = PowerRulesRuntime().run_once(tmp_path / "powerrules.yaml")
 
     assert result is expected_result
+    build_mocks.engine.return_value.evaluate.assert_called_once_with(dry_run=False)
 
-    mock_loader.return_value.load.assert_called_once_with(
-        configuration_file,
-    )
 
-    mock_builder.assert_called_once_with(
+@pytest.mark.usefixtures("patched_platform_providers")
+def test_runtime_run_once_propagates_condition_evaluation_error(
+    tmp_path: Path,
+    build_mocks: _BuildMocks,
+) -> None:
+    original_error = ConditionEvaluationError("Test condition failed")
+    build_mocks.engine.return_value.evaluate.side_effect = original_error
+
+    with pytest.raises(ConditionEvaluationError) as exc_info:
+        PowerRulesRuntime().run_once(tmp_path / "powerrules.yaml")
+
+    assert exc_info.value is original_error
+
+
+def test_runtime_builds_rule_engine_with_platform_providers(
+    tmp_path: Path,
+    patched_platform_providers: PlatformProviders,
+    build_mocks: _BuildMocks,
+) -> None:
+    providers = patched_platform_providers
+    configuration_file = tmp_path / "powerrules.yaml"
+
+    PowerRulesRuntime()._build_rule_engine(configuration_path=configuration_file)
+
+    build_mocks.loader.return_value.load.assert_called_once_with(configuration_file)
+    build_mocks.builder.assert_called_once_with(
         clock_provider=providers.clock,
         process_provider=providers.process,
         window_provider=providers.window,
-        power_provider=providers.power,
+        command_provider=providers.command,
+        base_directory=configuration_file.parent,
+        files_verifier=None,
+        condition_files_verifier=None,
     )
-
-    mock_builder.return_value.build.assert_called_once_with(
-        "configuration",
-    )
-
-    mock_engine.assert_called_once_with(
-        rule_set.rules,
-    )
-
-    mock_engine.return_value.evaluate.assert_called_once_with(dry_run=False)
+    build_mocks.builder.return_value.build.assert_called_once_with("configuration")
+    build_mocks.engine.assert_called_once_with(build_mocks.rule_set.rules)
 
 
-def test_runtime_run_once_propagates_condition_evaluation_error(
+@pytest.mark.usefixtures("patched_platform_providers")
+def test_runtime_passes_files_verifiers_of_trust_checker_to_builder(
     tmp_path: Path,
+    build_mocks: _BuildMocks,
 ) -> None:
+    trust_checker = make_trust_checker()
     configuration_file = tmp_path / "powerrules.yaml"
-    rule_set = RuleSet(rules=())
 
-    original_error = ConditionEvaluationError("Test condition failed")
+    PowerRulesRuntime(trust_checker=trust_checker)._build_rule_engine(
+        configuration_path=configuration_file
+    )
 
-    with (
-        patch("powerrules.application.runtime.ConfigurationLoader") as mock_loader,
-        patch("powerrules.application.runtime.ConfigurationBuilder") as mock_builder,
-        patch("powerrules.application.runtime.RuleEngine") as mock_engine,
-    ):
-        mock_loader.return_value.load.return_value = "configuration"
-        mock_builder.return_value.build.return_value = rule_set
-        mock_engine.return_value.evaluate.side_effect = original_error
+    builder_arguments = build_mocks.builder.call_args.kwargs
+    files_verifier = builder_arguments["files_verifier"]
+    condition_files_verifier = builder_arguments["condition_files_verifier"]
 
-        with pytest.raises(ConditionEvaluationError) as exc_info:
-            PowerRulesRuntime().run_once(configuration_file)
-
-    assert exc_info.value is original_error
+    assert files_verifier.func == trust_checker.verify_files
+    assert files_verifier.args == (configuration_file.resolve(),)
+    assert condition_files_verifier.func == trust_checker.verify_condition_files
+    assert condition_files_verifier.args == (configuration_file.resolve(),)
 
 
 def test_runtime_run_continuously_threads_previous_matched_rule_between_evaluations() -> (
     None
 ):
-    rule = Rule(
-        name="Test rule",
-        condition=Dummy_Condition(given_result=True),
-        action=Dummy_Action(),
+    rule = make_rule()
+    rule_engine = make_rule_engine_mock(
+        results=[
+            RuleEvaluationResult(matched_rule=rule, action_triggered=True),
+            RuleEvaluationResult(matched_rule=rule, action_triggered=False),
+            RuleEvaluationResult(matched_rule=None, action_triggered=False),
+            RuleEvaluationResult(matched_rule=rule, action_triggered=True),
+        ]
     )
-
-    rule_engine = Mock()
-    rule_engine.evaluate.side_effect = [
-        RuleEvaluationResult(matched_rule=rule, action_triggered=True),
-        RuleEvaluationResult(matched_rule=rule, action_triggered=False),
-        RuleEvaluationResult(matched_rule=None, action_triggered=False),
-        RuleEvaluationResult(matched_rule=rule, action_triggered=True),
-    ]
 
     with (
         patch(
@@ -163,15 +185,9 @@ def test_runtime_run_continuously_threads_previous_matched_rule_between_evaluati
 
 
 def test_runtime_run_continuously_stops_after_match_when_enabled() -> None:
-    rule = Rule(
-        name="Test rule",
-        condition=Dummy_Condition(given_result=True),
-        action=Dummy_Action(),
-    )
-
-    rule_engine = Mock()
-    rule_engine.evaluate.return_value = RuleEvaluationResult(
-        matched_rule=rule, action_triggered=True
+    rule = make_rule()
+    rule_engine = make_rule_engine_mock(
+        result=RuleEvaluationResult(matched_rule=rule, action_triggered=True)
     )
 
     with (
@@ -197,18 +213,14 @@ def test_runtime_run_continuously_stops_after_match_when_enabled() -> None:
 
 
 def test_runtime_run_continuously_does_not_stop_after_match_when_disabled() -> None:
-    rule = Rule(
-        name="Test rule",
-        condition=Dummy_Condition(given_result=True),
-        action=Dummy_Action(),
+    rule = make_rule()
+    rule_engine = make_rule_engine_mock(
+        results=[
+            RuleEvaluationResult(matched_rule=rule, action_triggered=True),
+            RuleEvaluationResult(matched_rule=None, action_triggered=False),
+            RuleEvaluationResult(matched_rule=rule, action_triggered=True),
+        ]
     )
-
-    rule_engine = Mock()
-    rule_engine.evaluate.side_effect = [
-        RuleEvaluationResult(matched_rule=rule, action_triggered=True),
-        RuleEvaluationResult(matched_rule=None, action_triggered=False),
-        RuleEvaluationResult(matched_rule=rule, action_triggered=True),
-    ]
 
     with (
         patch(
@@ -240,8 +252,7 @@ def test_runtime_run_continuously_does_not_stop_after_match_when_disabled() -> N
 
 
 def test_runtime_run_continuously_uses_configured_evaluation_interval() -> None:
-    rule_engine = Mock()
-    rule_engine.evaluate.return_value = RuleEvaluationResult(matched_rule=None)
+    rule_engine = make_rule_engine_mock()
 
     with (
         patch(
@@ -249,6 +260,11 @@ def test_runtime_run_continuously_uses_configured_evaluation_interval() -> None:
             return_value=rule_engine,
         ),
         patch("powerrules.application.runtime.time.sleep") as sleep,
+        # An evaluation takes no time, so the whole interval is waited for
+        patch(
+            "powerrules.application.runtime.time.monotonic",
+            make_monotonic_clock(0.0),
+        ),
     ):
         # Consuming two evaluations means the generator sleeps exactly once in between
         results = list(
@@ -265,7 +281,10 @@ def test_runtime_run_continuously_uses_configured_evaluation_interval() -> None:
     sleep.assert_called_once_with(30.0)
 
 
-@pytest.mark.parametrize("evaluation_interval", [0, -1, -10.5])
+@pytest.mark.parametrize(
+    "evaluation_interval",
+    [0, -1, -10.5, float("nan"), float("inf"), threading.TIMEOUT_MAX * 2],
+)
 def test_runtime_run_continuously_rejects_invalid_evaluation_interval(
     evaluation_interval: float,
 ) -> None:
@@ -281,8 +300,7 @@ def test_runtime_run_continuously_rejects_invalid_evaluation_interval(
 
 
 def test_runtime_run_continuously_builds_rule_engine_only_once() -> None:
-    rule_engine = Mock()
-    rule_engine.evaluate.return_value = RuleEvaluationResult(matched_rule=None)
+    rule_engine = make_rule_engine_mock()
 
     build_rule_engine = Mock(return_value=rule_engine)
 
@@ -307,62 +325,6 @@ def test_runtime_run_continuously_builds_rule_engine_only_once() -> None:
     build_rule_engine.assert_called_once_with(Path("powerrules.yaml"))
 
 
-def test_runtime_builds_rule_engine_with_platform_providers(
-    tmp_path: Path,
-) -> None:
-    configuration_file = tmp_path / "powerrules.yaml"
-    rule_set = RuleSet(rules=())
-
-    # It does not really matter which platform provider is mocked here
-    providers = PlatformProviders(
-        clock=Mock(spec=SystemClockProvider),
-        process=Mock(spec=PsUtilProcessProvider),
-        window=Mock(spec=WindowsWindowProvider),
-        power=Mock(spec=WindowsPowerProvider),
-    )
-
-    with (
-        patch(
-            "powerrules.application.runtime.ConfigurationLoader",
-        ) as mock_loader,
-        patch(
-            "powerrules.application.runtime.ConfigurationBuilder",
-        ) as mock_builder,
-        patch(
-            "powerrules.application.runtime.RuleEngine",
-        ) as mock_engine,
-        patch(
-            "powerrules.application.runtime.get_platform_providers",
-            return_value=providers,
-        ),
-    ):
-        mock_loader.return_value.load.return_value = "configuration"
-        mock_builder.return_value.build.return_value = rule_set
-
-        PowerRulesRuntime._build_rule_engine(
-            configuration_path=configuration_file,
-        )
-
-    mock_loader.return_value.load.assert_called_once_with(
-        configuration_file,
-    )
-
-    mock_builder.assert_called_once_with(
-        clock_provider=providers.clock,
-        process_provider=providers.process,
-        window_provider=providers.window,
-        power_provider=providers.power,
-    )
-
-    mock_builder.return_value.build.assert_called_once_with(
-        "configuration",
-    )
-
-    mock_engine.assert_called_once_with(
-        rule_set.rules,
-    )
-
-
 ##############################
 # get_platform_providers tests
 ##############################
@@ -378,7 +340,8 @@ def test_get_platform_providers_returns_windows_providers() -> None:
     assert isinstance(providers, PlatformProviders)
     assert isinstance(providers.clock, SystemClockProvider)
     assert isinstance(providers.process, PsUtilProcessProvider)
-    assert isinstance(providers.power, WindowsPowerProvider)
+    assert isinstance(providers.command, SubprocessCommandProvider)
+    assert providers.command.default_shell is Shell.POWERSHELL
 
 
 def test_get_platform_providers_returns_linux_providers() -> None:
@@ -391,7 +354,8 @@ def test_get_platform_providers_returns_linux_providers() -> None:
     assert isinstance(providers, PlatformProviders)
     assert isinstance(providers.clock, SystemClockProvider)
     assert isinstance(providers.process, PsUtilProcessProvider)
-    assert isinstance(providers.power, LinuxPowerProvider)
+    assert isinstance(providers.command, SubprocessCommandProvider)
+    assert providers.command.default_shell is Shell.SH
 
 
 def test_get_platform_providers_returns_macos_providers() -> None:
@@ -404,7 +368,8 @@ def test_get_platform_providers_returns_macos_providers() -> None:
     assert isinstance(providers, PlatformProviders)
     assert isinstance(providers.clock, SystemClockProvider)
     assert isinstance(providers.process, PsUtilProcessProvider)
-    assert isinstance(providers.power, MacOSPowerProvider)
+    assert isinstance(providers.command, SubprocessCommandProvider)
+    assert providers.command.default_shell is Shell.SH
 
 
 def test_get_platform_providers_rejects_unsupported_platform() -> None:
@@ -419,3 +384,133 @@ def test_get_platform_providers_rejects_unsupported_platform() -> None:
         ),
     ):
         get_platform_providers()
+
+
+######################################
+# Evaluation interval and timing tests
+######################################
+
+
+def test_runtime_run_continuously_only_sleeps_for_the_remaining_time() -> None:
+    rule_engine = make_rule_engine_mock()
+
+    with (
+        patch(
+            "powerrules.application.runtime.PowerRulesRuntime._build_rule_engine",
+            return_value=rule_engine,
+        ),
+        patch("powerrules.application.runtime.time.sleep") as sleep,
+        # Start of the first evaluation, end of it (3 seconds later), start of the second evaluation
+        patch(
+            "powerrules.application.runtime.time.monotonic",
+            make_monotonic_clock(0.0, 3.0, 10.0),
+        ),
+    ):
+        results = list(
+            itertools.islice(
+                PowerRulesRuntime().run_continuously(
+                    configuration_path=Path("powerrules.yaml"),
+                    evaluation_interval=10.0,
+                ),
+                2,
+            )
+        )
+
+    assert len(results) == 2
+    sleep.assert_called_once_with(7.0)
+
+
+def test_runtime_run_continuously_warns_and_continues_if_evaluation_exceeds_interval(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rule_engine = make_rule_engine_mock()
+
+    with (
+        patch(
+            "powerrules.application.runtime.PowerRulesRuntime._build_rule_engine",
+            return_value=rule_engine,
+        ),
+        patch("powerrules.application.runtime.time.sleep") as sleep,
+        # The first evaluation takes 15 seconds, which is longer than the interval
+        patch(
+            "powerrules.application.runtime.time.monotonic",
+            make_monotonic_clock(0.0, 15.0, 15.0),
+        ),
+        caplog.at_level(logging.WARNING, logger="powerrules.application.runtime"),
+    ):
+        results = list(
+            itertools.islice(
+                PowerRulesRuntime().run_continuously(
+                    configuration_path=Path("powerrules.yaml"),
+                    evaluation_interval=10.0,
+                ),
+                2,
+            )
+        )
+
+    assert len(results) == 2
+    # The next evaluation starts immediately
+    sleep.assert_not_called()
+
+    records = get_log_records(
+        caplog, "powerrules.application.runtime", min_level=logging.WARNING
+    )
+
+    assert [record.getMessage() for record in records] == [
+        "Evaluation took longer than the interval of 10 seconds, starting the next one immediately"
+    ]
+
+
+def test_runtime_run_continuously_does_not_warn_if_evaluation_is_fast_enough(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rule_engine = make_rule_engine_mock()
+
+    with (
+        patch(
+            "powerrules.application.runtime.PowerRulesRuntime._build_rule_engine",
+            return_value=rule_engine,
+        ),
+        patch("powerrules.application.runtime.time.sleep"),
+        patch(
+            "powerrules.application.runtime.time.monotonic",
+            make_monotonic_clock(0.0),
+        ),
+        caplog.at_level(logging.WARNING, logger="powerrules.application.runtime"),
+    ):
+        list(
+            itertools.islice(
+                PowerRulesRuntime().run_continuously(
+                    configuration_path=Path("powerrules.yaml"),
+                ),
+                3,
+            )
+        )
+
+    assert (
+        get_log_records(
+            caplog, "powerrules.application.runtime", min_level=logging.WARNING
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("interval", [0.001, 1, 10.0, threading.TIMEOUT_MAX])
+def test_validate_evaluation_interval_accepts_usable_intervals(
+    interval: float,
+) -> None:
+    validate_evaluation_interval(interval)
+
+
+@pytest.mark.parametrize(
+    "interval",
+    [0, -0.001, float("-inf"), float("nan"), float("inf"), threading.TIMEOUT_MAX * 2],
+)
+def test_validate_evaluation_interval_rejects_unusable_intervals(
+    interval: float,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="Evaluation interval must be greater than zero and at most",
+    ):
+        validate_evaluation_interval(interval)

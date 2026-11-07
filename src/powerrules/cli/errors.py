@@ -10,12 +10,16 @@ from pydantic import ValidationError
 from powerrules.engine.exceptions import (
     ActionExecutionError,
     ConditionEvaluationError,
+    FileIntegrityError,
+    PolicyNotTrustedError,
+    TrustStoreError,
 )
 
 logger = logging.getLogger(__name__)
 
 EXIT_RUNTIME_ERROR = 1
 EXIT_POLICY_ERROR = 2
+EXIT_POLICY_TRUST_ERROR = 3
 
 ReturnType = TypeVar("ReturnType")
 
@@ -49,6 +53,15 @@ def handle_cli_error(error: Exception) -> NoReturn:
             logger.error(f"{location}: {message}")
 
         raise typer.Exit(code=EXIT_POLICY_ERROR)
+
+    # The message already explains which policy or file is affected and how to trust it
+    if isinstance(error, PolicyNotTrustedError | FileIntegrityError):
+        logger.error(str(error))
+        raise typer.Exit(code=EXIT_POLICY_TRUST_ERROR)
+
+    if isinstance(error, TrustStoreError):
+        logger.error(str(error))
+        raise typer.Exit(code=EXIT_RUNTIME_ERROR)
 
     # The existing error messages for conditions and actions
     if isinstance(error, ConditionEvaluationError):
@@ -84,7 +97,7 @@ def cli_command(
     def wrapper(*args: Any, **kwargs: Any) -> ReturnType:
         try:
             return function(*args, **kwargs)
-        except typer.Exit:
+        except (typer.Exit, typer.Abort):
             raise
         except Exception as e:  # noqa: BLE001 (blind catch is intentional)
             # Handle errors which result from CLI commands. This avoids tracebacks and instead shows a readable error message

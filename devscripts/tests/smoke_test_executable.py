@@ -1,9 +1,16 @@
-"""Run smoke tests against a built PowerRules executable (called by build_executable.py, not pytest).
+"""Run smoke tests against a built PowerRules executable (called by build_executable.py or manually, not pytest).
 
-Every scenario only validates policies or uses "--dry-run", so the power state of the machine is never changed.
+Every scenario only validates policies or uses "--dry-run", except the scenarios which are marked with
+"executes_commands". Those only run harmless commands (echo, an exit code and a sleep).
+
+Usage:
+    poetry run python devscripts/tests/smoke_test_executable.py <path to the executable>
 """
 
+import argparse
+import os
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,8 +20,14 @@ SCENARIO_TIMEOUT_SECONDS = 120
 # Placeholder for the path of the policy file in the arguments of a scenario
 POLICY_PLACEHOLDER = "{policy}"
 
+# Mirrors EXIT_RUNTIME_ERROR of powerrules.cli.errors
+EXIT_RUNTIME_ERROR = 1
+
 # Mirrors EXIT_POLICY_ERROR of powerrules.cli.errors, the executable is intentionally tested as a black box
 EXIT_POLICY_ERROR = 2
+
+# Mirrors EXIT_POLICY_TRUST_ERROR of powerrules.cli.errors
+EXIT_POLICY_TRUST_ERROR = 3
 
 # A healthy executable never prints these. They indicate a missing module or an unclassified error
 FORBIDDEN_OUTPUT = (
@@ -24,7 +37,8 @@ FORBIDDEN_OUTPUT = (
     "Unexpected error",
 )
 
-# Matches on every day of the next centuries, so the result does not depend on when the test runs
+# Matches on every day of the next centuries, so the result does not depend on when the test runs.
+# The commands of this policy are never run, because every scenario which evaluates it uses "--dry-run"
 MATCHING_POLICY = """
 rules:
   - name: "Smoke test rule"
@@ -42,8 +56,11 @@ rules:
               end: "2999-12-31"
             weekday: [Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday]
             month: [January, February, March, April, May, June, July, August, September, October, November, December]
-    action:
-      type: shutdown
+    actions:
+      - name: "Cleanup"
+        run: "echo cleanup"
+      - name: "Shutdown"
+        run: "echo shutdown"
 """
 
 # The window provider is usually not available on CI runners, so both a match and an evaluation error are fine
@@ -54,8 +71,79 @@ rules:
       window:
         title: "powerrules-smoke-test-window"
         exists: false
+    actions:
+      - run: "echo sleep"
+"""
+
+# The command of a condition runs even in a dry run, so the policy has to be trusted first.
+# The command is harmless and behaves the same in PowerShell and sh
+COMMAND_CONDITION_POLICY = """
+rules:
+  - name: "Smoke test command condition"
+    conditions:
+      command:
+        run: "echo powerrules-smoke-test"
+        stdout:
+          value: "powerrules-smoke-test"
+          match:
+            type: contains
+    actions:
+      - name: "Never run"
+        run: "echo never"
+"""
+
+# The following policies run real commands. They behave the same in PowerShell and sh and never change the machine
+REAL_COMMAND_POLICY = """
+rules:
+  - name: "Smoke test real command"
+    conditions:
+      datetime:
+        between:
+          start: "2000-01-01"
+          end: "2999-12-31"
+    actions:
+      - name: "Echo"
+        run: "echo powerrules-smoke-test"
+"""
+
+FAILING_COMMAND_POLICY = """
+rules:
+  - name: "Smoke test failing command"
+    conditions:
+      datetime:
+        between:
+          start: "2000-01-01"
+          end: "2999-12-31"
+    actions:
+      - name: "Failing"
+        run: "exit 3"
+"""
+
+# Exercises the termination of the process tree after the timeout
+TIMEOUT_COMMAND_POLICY = """
+rules:
+  - name: "Smoke test command timeout"
+    conditions:
+      datetime:
+        between:
+          start: "2000-01-01"
+          end: "2999-12-31"
+    actions:
+      - name: "Slow"
+        run: "sleep 30"
+        timeout: 1
+"""
+
+# The format of the actions before commands were introduced
+FORMER_ACTION_POLICY = """
+rules:
+  - name: "Former action rule"
+    conditions:
+      process:
+        name: "backup.exe"
+        exists: false
     action:
-      type: sleep
+      type: shutdown
 """
 
 INVALID_YAML_POLICY = """
@@ -70,8 +158,10 @@ rules:
       process:
         name: "backup.exe"
         exists: "not a boolean"
-    action:
-      type: shutdown
+    actions:
+      # Windows command
+      - name: "Shutdown"
+        run: "shutdown /s /t 0"
 """
 
 
@@ -85,6 +175,7 @@ class SmokeScenario:
         policy: Content of the policy file. None means that no policy file exists.
         expected_exit_codes: Accepted exit codes of the executable.
         expected_output: Strings which have to be part of the combined stdout and stderr.
+        executes_commands: Allows a policy run without "--dry-run". Only set it for policies with harmless commands.
     """
 
     name: str
@@ -92,10 +183,15 @@ class SmokeScenario:
     policy: str | None = None
     expected_exit_codes: frozenset[int] = frozenset({0})
     expected_output: tuple[str, ...] = ()
+    executes_commands: bool = False
 
     def __post_init__(self) -> None:
-        # Safety net: a scenario must never be able to change the power state of the machine
-        if "run" in self.arguments and "--dry-run" not in self.arguments:
+        # Safety net: a scenario must never be able to run commands on the machine without "--dry-run", except the scenario is explicitly marked as safe
+        if (
+            "run" in self.arguments
+            and "--dry-run" not in self.arguments
+            and not self.executes_commands
+        ):
             raise ValueError(
                 f"Scenario '{self.name}' runs a policy without '--dry-run'"
             )
@@ -105,7 +201,7 @@ SCENARIOS = (
     SmokeScenario(
         name="help",
         arguments=("--help",),
-        expected_output=("A rule-based computer power state management tool",),
+        expected_output=("A rule-based command automation tool",),
     ),
     SmokeScenario(
         name="validate valid policy",
@@ -131,7 +227,7 @@ SCENARIOS = (
         ),
         policy=MATCHING_POLICY,
         expected_output=(
-            "[DRY RUN] Rule 'Smoke test rule' matched, would have executed action: shutdown",
+            "[DRY RUN] Rule 'Smoke test rule' matched, would have executed actions: 'Cleanup', 'Shutdown'",
         ),
     ),
     SmokeScenario(
@@ -161,6 +257,54 @@ SCENARIOS = (
         expected_exit_codes=frozenset({0, 1}),
     ),
     SmokeScenario(
+        name="run once with real command",
+        arguments=(
+            "policy",
+            "run",
+            "--once",
+            # Untrusted policies are rejected by default
+            "--no-require-trust",
+            "--policy",
+            POLICY_PLACEHOLDER,
+        ),
+        policy=REAL_COMMAND_POLICY,
+        executes_commands=True,
+        # This message is only logged after the command was started and finished
+        expected_output=("Action 'Echo' finished with exit code 0",),
+    ),
+    SmokeScenario(
+        name="run once with failing command",
+        arguments=(
+            "policy",
+            "run",
+            "--once",
+            # Untrusted policies are rejected by default
+            "--no-require-trust",
+            "--policy",
+            POLICY_PLACEHOLDER,
+        ),
+        policy=FAILING_COMMAND_POLICY,
+        executes_commands=True,
+        expected_exit_codes=frozenset({EXIT_RUNTIME_ERROR}),
+        expected_output=("Action 'Failing' returned exit code 3, expected one of: 0",),
+    ),
+    SmokeScenario(
+        name="run once with command timeout",
+        arguments=(
+            "policy",
+            "run",
+            "--once",
+            # Untrusted policies are rejected by default
+            "--no-require-trust",
+            "--policy",
+            POLICY_PLACEHOLDER,
+        ),
+        policy=TIMEOUT_COMMAND_POLICY,
+        executes_commands=True,
+        expected_exit_codes=frozenset({EXIT_RUNTIME_ERROR}),
+        expected_output=("Action 'Slow' timed out after 1 seconds",),
+    ),
+    SmokeScenario(
         name="missing policy file",
         arguments=("policy", "validate", "--policy", POLICY_PLACEHOLDER),
         expected_exit_codes=frozenset({EXIT_POLICY_ERROR}),
@@ -179,6 +323,90 @@ SCENARIOS = (
         policy=INVALID_POLICY,
         expected_exit_codes=frozenset({EXIT_POLICY_ERROR}),
         expected_output=("Policy validation failed",),
+    ),
+    SmokeScenario(
+        name="former action format",
+        arguments=("policy", "validate", "--policy", POLICY_PLACEHOLDER),
+        policy=FORMER_ACTION_POLICY,
+        expected_exit_codes=frozenset({EXIT_POLICY_ERROR}),
+        expected_output=("Policy validation failed",),
+    ),
+    # The following scenarios depend on each other: rejected, trusted, run, listed, untrusted
+    SmokeScenario(
+        name="run once with untrusted policy",
+        arguments=("policy", "run", "--once", "--policy", POLICY_PLACEHOLDER),
+        policy=REAL_COMMAND_POLICY,
+        # Nothing is run because the policy is rejected, the flag only satisfies the safety net
+        executes_commands=True,
+        expected_exit_codes=frozenset({EXIT_POLICY_TRUST_ERROR}),
+        expected_output=("trust add --policy",),
+    ),
+    SmokeScenario(
+        name="trust add",
+        arguments=("trust", "add", "--policy", POLICY_PLACEHOLDER),
+        policy=REAL_COMMAND_POLICY,
+        expected_output=("is now trusted",),
+    ),
+    SmokeScenario(
+        name="run once with trusted policy",
+        arguments=("policy", "run", "--once", "--policy", POLICY_PLACEHOLDER),
+        policy=REAL_COMMAND_POLICY,
+        executes_commands=True,
+        expected_output=("Action 'Echo' finished with exit code 0",),
+    ),
+    SmokeScenario(
+        name="trust list",
+        arguments=("trust", "list"),
+        policy=REAL_COMMAND_POLICY,
+        expected_output=("Trusted at",),
+    ),
+    SmokeScenario(
+        name="trust remove",
+        arguments=("trust", "remove", "--policy", POLICY_PLACEHOLDER),
+        policy=REAL_COMMAND_POLICY,
+        expected_output=("is no longer trusted",),
+    ),
+    # The following scenarios depend on each other: rejected, trusted, run, untrusted
+    SmokeScenario(
+        name="dry run with untrusted command condition",
+        arguments=(
+            "policy",
+            "run",
+            "--once",
+            "--dry-run",
+            "--policy",
+            POLICY_PLACEHOLDER,
+        ),
+        policy=COMMAND_CONDITION_POLICY,
+        expected_exit_codes=frozenset({EXIT_POLICY_TRUST_ERROR}),
+        expected_output=("trust add --policy",),
+    ),
+    SmokeScenario(
+        name="trust add command condition policy",
+        arguments=("trust", "add", "--policy", POLICY_PLACEHOLDER),
+        policy=COMMAND_CONDITION_POLICY,
+        expected_output=("is now trusted",),
+    ),
+    SmokeScenario(
+        name="dry run with trusted command condition",
+        arguments=(
+            "policy",
+            "run",
+            "--once",
+            "--dry-run",
+            "--policy",
+            POLICY_PLACEHOLDER,
+        ),
+        policy=COMMAND_CONDITION_POLICY,
+        expected_output=(
+            "[DRY RUN] Rule 'Smoke test command condition' matched, would have executed actions: 'Never run'",
+        ),
+    ),
+    SmokeScenario(
+        name="trust remove command condition policy",
+        arguments=("trust", "remove", "--policy", POLICY_PLACEHOLDER),
+        policy=COMMAND_CONDITION_POLICY,
+        expected_output=("is no longer trusted",),
     ),
 )
 
@@ -233,20 +461,32 @@ def _run_scenario(
     Returns:
         A description of the failure, or None if the scenario passed.
     """
+    # The logging options belong to the "policy" commands, other scenarios (e.g. "--help") do not log
+    log_arguments = (
+        ("--log-file", str(log_path)) if scenario.arguments[:1] == ("policy",) else ()
+    )
+
     command = [
         str(executable),
-        "--log-file",
-        str(log_path),
         *(
             argument.replace(POLICY_PLACEHOLDER, str(policy_path))
             for argument in scenario.arguments
         ),
+        *log_arguments,
     ]
+
+    # The trust store lives in the home directory, which must never be the one of the machine which builds the executable
+    environment = {
+        **os.environ,
+        "HOME": str(working_directory),
+        "USERPROFILE": str(working_directory),
+    }
 
     try:
         result = subprocess.run(
             command,
             cwd=working_directory,
+            env=environment,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -269,8 +509,41 @@ def _run_scenario(
         if forbidden in output:
             return f"output contains '{forbidden}'\n{output}"
 
+    # Rich wraps long log lines at the console width, so line breaks and indentation can appear between any two words
+    normalized_output = " ".join(output.split())
+
     for expected in scenario.expected_output:
-        if expected not in output:
+        if " ".join(expected.split()) not in normalized_output:
             return f"output does not contain '{expected}'\n{output}"
 
     return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the smoke tests against an existing executable and return the process exit code."""
+    parser = argparse.ArgumentParser(
+        description="Run the smoke tests against a built PowerRules executable"
+    )
+    parser.add_argument("executable", type=Path, help="Path to the built executable")
+    arguments = parser.parse_args(argv)
+
+    if not arguments.executable.is_file():
+        print(f"[ERROR] Executable not found: {arguments.executable}")
+
+        return 1
+
+    failures = run_smoke_tests(arguments.executable)
+
+    for failure in failures:
+        print(f"[ERROR] Smoke test failed: {failure}")
+
+    if failures:
+        return 1
+
+    print("[INFO] All smoke tests passed")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

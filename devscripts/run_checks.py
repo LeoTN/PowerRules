@@ -10,10 +10,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The formatter runs first, so the linter and the tests see the formatted code
+# The formatters run first, so the linter and the tests see the formatted code
 CHECKS: dict[str, list[str]] = {
     "ruff format": [sys.executable, "-m", "ruff", "format", "."],
-    "ruff check": [sys.executable, "-m", "ruff", "check", "."],
+    # Runs after "ruff format", because the formatter may change the indentation of comments
+    "format comment blocks": [
+        sys.executable,
+        str(REPO_ROOT / "devscripts" / "format_comment_blocks.py"),
+        "--fix",
+    ],
+    "ruff check --fix": [sys.executable, "-m", "ruff", "check", "--fix", "."],
     "pytest": [sys.executable, "-m", "pytest"],
 }
 

@@ -1,56 +1,73 @@
+import logging
 import platform
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
-from powerrules.actions.base import Action
-from powerrules.actions.power import (
-    HibernateAction,
-    RebootAction,
-    ShutdownAction,
-    SleepAction,
-)
 from powerrules.config.builder import ConfigurationBuilder
 from powerrules.config.loader import ConfigurationLoader
 from powerrules.engine.models import Rule, RuleEvaluationResult
 from powerrules.engine.rule_engine import RuleEngine
 from powerrules.platform.clock import SystemClockProvider
-from powerrules.platform.linux.power import LinuxPowerProvider
+from powerrules.platform.command import SubprocessCommandProvider
 from powerrules.platform.linux.window import LinuxWindowProvider
-from powerrules.platform.macos.power import MacOSPowerProvider
 from powerrules.platform.macos.window import MacOSWindowProvider
 from powerrules.platform.process import PsUtilProcessProvider
-from powerrules.platform.windows.power import WindowsPowerProvider
 from powerrules.platform.windows.window import WindowsWindowProvider
 from powerrules.providers.clock import ClockProvider
-from powerrules.providers.power import PowerProvider
+from powerrules.providers.command import CommandProvider, Shell
 from powerrules.providers.process import ProcessProvider
 from powerrules.providers.window import WindowProvider
+from powerrules.trust.checker import PolicyTrustChecker
 
-# Maps the built-in power actions to their configured type name (see ActionConfiguration.type)
-_ACTION_TYPE_NAMES: dict[type[Action], str] = {
-    ShutdownAction: "shutdown",
-    SleepAction: "sleep",
-    HibernateAction: "hibernate",
-    RebootAction: "reboot",
-}
+logger = logging.getLogger(__name__)
+
+# Delay between two evaluations of a policy in seconds
+DEFAULT_EVALUATION_INTERVAL_SECONDS = 10.0
 
 
-def describe_action(action: Action) -> str:
-    """Return a human-readable name for an action.
+def describe_actions(rule: Rule) -> str:
+    """Return a human-readable list of the actions of a rule.
 
     Args:
-        action: PowerRules action to describe.
+        rule: PowerRules rule whose actions are described.
 
     Returns:
-        The action's configured type name (e.g. "shutdown") or its class name if it is not one of the built-in power actions.
+        The quoted names of the actions separated by commas (e.g. "'Cleanup', 'Shutdown'").
     """
-    return _ACTION_TYPE_NAMES.get(type(action), type(action).__name__)
+    return ", ".join(f"'{action.name}'" for action in rule.actions)
+
+
+def validate_evaluation_interval(evaluation_interval: float) -> None:
+    """Validate the delay between two evaluations of a policy.
+
+    Args:
+        evaluation_interval: Delay between evaluations in seconds.
+
+    Raises:
+        ValueError: If the interval is not greater than zero or too large to be waited for.
+    """
+    # The comparison is written as a positive chain on purpose: every comparison with NaN is False, so NaN is rejected as well.
+    # Infinity exceeds the maximum. The maximum is the largest wait time the platform supports, a larger value would make "time.sleep()" fail
+    if not 0 < evaluation_interval <= threading.TIMEOUT_MAX:
+        raise ValueError(
+            f"Evaluation interval must be greater than zero and at most {threading.TIMEOUT_MAX:.0f} seconds"
+        )
 
 
 class PowerRulesRuntime:
     """Coordinate PowerRules configuration loading and rule evaluation and action execution."""
+
+    def __init__(self, trust_checker: PolicyTrustChecker | None = None) -> None:
+        """Create the runtime.
+
+        Args:
+            trust_checker: Checks whether a policy is trusted before it is loaded. None skips the check.
+        """
+        self.trust_checker = trust_checker
 
     def run_once(
         self,
@@ -71,6 +88,9 @@ class PowerRulesRuntime:
         Raises:
             ConditionEvaluationError: If a condition cannot be evaluated.
             ActionExecutionError: If a matching action cannot be executed.
+            PolicyNotTrustedError: If trust is required and the policy is not trusted.
+            TrustStoreError: If trust is required and the trust store cannot be read.
+            FileIntegrityError: If trust is required and a trusted file cannot be read, is not trusted yet or was modified.
         """
         rule_engine = self._build_rule_engine(configuration_path)
 
@@ -79,7 +99,7 @@ class PowerRulesRuntime:
     def run_continuously(
         self,
         configuration_path: Path,
-        evaluation_interval: float = 10.0,
+        evaluation_interval: float = DEFAULT_EVALUATION_INTERVAL_SECONDS,
         stop_on_match: bool = False,
         dry_run: bool = False,
     ) -> Iterator[RuleEvaluationResult]:
@@ -91,9 +111,12 @@ class PowerRulesRuntime:
         The returned iterator yields the result of every evaluation, so the caller can react to matches (e.g. for logging) as they happen.
         If "stop_on_match" is True, the iterator stops right after yielding a result whose action was triggered.
 
+        The interval is the delay between the starts of two evaluations. Only the time which is left after an evaluation is waited for.
+        If an evaluation takes longer than the interval, a warning is logged and the next evaluation starts immediately.
+
         Args:
             configuration_path: Path to the PowerRules policy file.
-            evaluation_interval: Delay between evaluations in seconds.
+            evaluation_interval: Delay between the starts of two evaluations in seconds.
             stop_on_match: Stop the evaluation once a rule's action is triggered.
             dry_run: If True, find the matching rule but do not execute its action.
 
@@ -101,13 +124,17 @@ class PowerRulesRuntime:
             An iterator yielding the result of every evaluation.
 
         Raises:
-            ValueError: If the evaluation interval is less than or equal to zero.
-                Raised immediately, before any evaluation takes place.
+            ValueError: If the evaluation interval is not greater than zero or too large to be waited for,
+                see "validate_evaluation_interval()". Raised immediately, before any evaluation takes place.
             ConditionEvaluationError: If a condition cannot be evaluated. Raised while iterating.
             ActionExecutionError: If a matching action cannot be executed. Raised while iterating.
+            PolicyNotTrustedError: If trust is required and the policy is not trusted.
+                Raised immediately, before any evaluation takes place.
+            TrustStoreError: If trust is required and the trust store cannot be read.
+                Raised immediately, before any evaluation takes place.
+            FileIntegrityError: If trust is required and a trusted file cannot be read, is not trusted yet or was modified.
         """
-        if evaluation_interval <= 0:
-            raise ValueError("Evaluation interval must be greater than zero")
+        validate_evaluation_interval(evaluation_interval)
 
         # The policy is loaded and validated as soon as this method is called, not deferred until the first iteration
         rule_engine = self._build_rule_engine(configuration_path)
@@ -130,7 +157,7 @@ class PowerRulesRuntime:
 
         Args:
             rule_engine: The rule engine to evaluate.
-            evaluation_interval: Delay between evaluations in seconds.
+            evaluation_interval: Delay between the starts of two evaluations in seconds.
             stop_on_match: Stop the evaluation once a rule's action is triggered.
             dry_run: If True, report matching rules instead of executing their actions.
 
@@ -144,6 +171,9 @@ class PowerRulesRuntime:
         last_matched_rule: Rule | None = None
 
         while True:
+            # A monotonic clock is not affected by changes of the system time (e.g. daylight saving time or clock synchronization)
+            started_at = time.monotonic()
+
             result = rule_engine.evaluate(
                 previous_matched_rule=last_matched_rule,
                 dry_run=dry_run,
@@ -155,24 +185,54 @@ class PowerRulesRuntime:
             if result.action_triggered and stop_on_match:
                 return
 
-            time.sleep(evaluation_interval)
+            # The work of the caller while the iterator was suspended (e.g. logging) counts as well
+            remaining_time = evaluation_interval - (time.monotonic() - started_at)
 
-    @staticmethod
-    def _build_rule_engine(configuration_path: Path) -> RuleEngine:
+            if remaining_time <= 0:
+                logger.warning(
+                    f"Evaluation took longer than the interval of {evaluation_interval:g} seconds, starting the next one immediately"
+                )
+                continue
+
+            time.sleep(remaining_time)
+
+    def _build_rule_engine(self, configuration_path: Path) -> RuleEngine:
         """Build a rule engine from a policy file.
 
-        The policy is loaded and built exactly once per invocation.
+        The policy is loaded and built exactly once per invocation. If trust is checked, the trusted files
+        of all rules are verified right away, so problems are reported at the start and not only when an action runs.
 
         Args:
             configuration_path: Path to the PowerRules policy file.
 
         Returns:
             A configured rule engine.
+
+        Raises:
+            PolicyNotTrustedError: If trust is required and the policy is not trusted.
+            FileIntegrityError: If trust is required and a trusted file cannot be read, is not trusted yet or was modified.
+            TrustStoreError: If trust is required and the trust store cannot be read.
         """
-        configuration = ConfigurationLoader().load(configuration_path)
+        configuration = ConfigurationLoader(trust_checker=self.trust_checker).load(
+            configuration_path
+        )
 
         # Fetch the correct providers for the current platform / OS
         providers = get_platform_providers()
+
+        policy_path = configuration_path.resolve()
+        # Only the policy path is bound, the action passes its own files
+        files_verifier = (
+            partial(self.trust_checker.verify_files, policy_path)
+            if self.trust_checker is not None
+            else None
+        )
+        # Same for the command conditions, which have their own trust requirement
+        condition_files_verifier = (
+            partial(self.trust_checker.verify_condition_files, policy_path)
+            if self.trust_checker is not None
+            else None
+        )
 
         rule_set = ConfigurationBuilder(
             # Information about the current date and time
@@ -181,8 +241,12 @@ class PowerRulesRuntime:
             process_provider=providers.process,
             # Information about windows (not the OS :D)
             window_provider=providers.window,
-            # Basically an API to interact with the power state of the OS
-            power_provider=providers.power,
+            # Runs the commands of the actions and the command conditions
+            command_provider=providers.command,
+            # Commands run in the directory of the policy by default, no matter where PowerRules was started
+            base_directory=policy_path.parent,
+            files_verifier=files_verifier,
+            condition_files_verifier=condition_files_verifier,
         ).build(configuration)
 
         return RuleEngine(rule_set.rules)
@@ -195,7 +259,7 @@ class PlatformProviders:
     clock: ClockProvider
     process: ProcessProvider
     window: WindowProvider
-    power: PowerProvider
+    command: CommandProvider
 
 
 def get_platform_providers() -> PlatformProviders:
@@ -214,7 +278,7 @@ def get_platform_providers() -> PlatformProviders:
             clock=SystemClockProvider(),
             process=PsUtilProcessProvider(),
             window=WindowsWindowProvider(),
-            power=WindowsPowerProvider(),
+            command=SubprocessCommandProvider(default_shell=Shell.POWERSHELL),
         )
 
     if system_name == "Linux":
@@ -222,7 +286,7 @@ def get_platform_providers() -> PlatformProviders:
             clock=SystemClockProvider(),
             process=PsUtilProcessProvider(),
             window=LinuxWindowProvider(),
-            power=LinuxPowerProvider(),
+            command=SubprocessCommandProvider(default_shell=Shell.SH),
         )
 
     # MacOS
@@ -231,7 +295,7 @@ def get_platform_providers() -> PlatformProviders:
             clock=SystemClockProvider(),
             process=PsUtilProcessProvider(),
             window=MacOSWindowProvider(),
-            power=MacOSPowerProvider(),
+            command=SubprocessCommandProvider(default_shell=Shell.SH),
         )
 
     raise RuntimeError(f"Unsupported operating system: {system_name}")

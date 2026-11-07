@@ -19,9 +19,11 @@
 
 ## About
 
-Define rules to control your computer's power state based on configurable conditions.
+PowerRules is a rule-based command automation tool: when the conditions of a rule match, its commands run.
 
-Rules are evaluated from top to bottom. The first matching rule executes its configured action.
+Originally built to shut down a computer at the right moment, it now runs any shell command.
+
+Rules are evaluated from top to bottom and the first match runs its actions in order. Policies have to be [trusted](#trust) first, so modifications of a policy or its scripts do not go unnoticed.
 
 ## Getting Started
 
@@ -49,16 +51,22 @@ rules:
             between:
               start: "23"
               end: "1:30"
-    action:
-      type: shutdown
+    actions:
+      # Windows command
+      - name: "Shutdown"
+        run: "shutdown /s /t 0"
 ```
 
-3\. Validate and evaluate the policy once. Use `--dry-run` to see what would happen:
+3\. Validate the policy, [trust](#trust) it after reviewing it and evaluate it once. Use `--dry-run` to see what would happen:
 
 ```bash
 pwru policy validate --policy my-policy.yaml
+pwru trust add --policy my-policy.yaml
 pwru policy run --once --policy my-policy.yaml --dry-run
 ```
+
+> [!CAUTION]
+> Without `--dry-run`, a matching rule ***runs*** its commands. The example above could shut down your computer.
 
 > [!NOTE]
 > `pwru` is installed by pip. When using a [standalone binary](#supported-platforms), call it by its file name instead.
@@ -81,17 +89,29 @@ Match rules based on processes and window titles.
     exists: true
 ```
 
-### Regex Matching
+<details>
+  <summary><b>Options reference</b></summary><br>
 
-Match process names and window titles using regular expressions with full-string matching.
+| Option | Applies to | Default | Description |
+|--------|------------|---------|-------------|
+| `name` | `process` | required | Name of the process to check. |
+| `title` | `window` | required | Title of the window to check. |
+| `exists` | both | required | Whether the process or window is expected to exist. |
+| `match` | both | exact, case-sensitive | How the name or title is matched, see [Match Types](#match-types). |
+
+</details>
+
+### Match Types
+
+Match process names, window titles and command output using exact text, regular expressions or a part of the text. Regular expressions use full-string matching.
 
 ```yaml
 # Match if process name contains "fire"
 - process:
-    name: '.*fire.*'
+    name: "fire"
     exists: true
     match:
-      type: regex
+      type: contains
       case_sensitive: true # This is the default behavior
 
 # Match if window title starts with "firefox" (case insensitive)
@@ -103,9 +123,23 @@ Match process names and window titles using regular expressions with full-string
       case_sensitive: false
 ```
 
+A `.` in a regular expression also matches line breaks, so patterns work on multi-line output.
+
+<details>
+  <summary><b>Options reference</b></summary><br>
+
+Options of `match`:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `type` | `exact` | Matching mode: `exact`, `regex` (full-string match) or `contains` (part of the text). |
+| `case_sensitive` | `true` | Whether uppercase and lowercase letters should be treated differently. |
+
+</details>
+
 ### Time-based Conditions
 
-Match specific dates, time ranges, weekdays and months. If several of `between`, `weekday` and `month` are configured, all of them must match. The end of a range is always exclusive.
+Match specific dates, time ranges, weekdays and months. If several of `between`, `weekday` and `month` are configured, all of them must match. The start of a range is inclusive, the end is exclusive.
 
 ```yaml
 # Match every day from 23:00 until 1:30 the next morning
@@ -160,9 +194,83 @@ Match specific dates, time ranges, weekdays and months. If several of `between`,
       - "December"
 ```
 
-`start` and `end` must be of the same kind: both times, both dates or both dates with a time. All values use the local time of the computer, timezones are not supported.
+All values use the local time of the computer, timezones are not supported.
 
-If a time range crosses midnight, `weekday` and `month` refer to the day on which the range starts. For dates, they refer to the current day.
+<details>
+  <summary><b>Options reference</b></summary><br>
+
+At least one of `between`, `weekday` and `month` is required.
+
+| Option | Description |
+|--------|-------------|
+| `between` | Range during which the condition is satisfied. Both boundaries must be of the same kind (see below). |
+| `weekday` | List of English weekday names (case-insensitive), e.g. `Monday`. |
+| `month` | List of English month names (case-insensitive), e.g. `January`. |
+
+`weekday` and `month`: If the time range crosses midnight, they refer to the day on which the range starts. For absolute ranges, they refer to the current day.
+
+<br>
+
+Kinds of `between`:
+
+| Kind | Format | Example | Description |
+|------|--------|---------|-------------|
+| Time of day | `H`, `HH`, `H:MM`, `HH:MM`, `H:MM:SS` or `HH:MM:SS` | `"23"`, `"1:30"` | Repeats every day and may cross midnight. |
+| Date | `YYYY-MM-DD` | `"2026-08-21"` | Covers whole days, from 0:00 of the start date until 0:00 of the end date. |
+| Date with time | `YYYY-MM-DD` followed by a space or `T` and a time | `"2026-08-21 18:00"` | Absolute range without timezone. |
+
+</details>
+
+### Command Conditions
+
+Match rules based on the result of a command. The condition is satisfied if the exit code counts as success and the output matches.
+
+```yaml
+# Match if nginx is active
+- command:
+    run: "systemctl is-active nginx"
+    shell: bash
+    timeout: 5
+
+# Match if the script exits with 0 or 2 and prints "ready" (case insensitive)
+- command:
+    run: "check.sh"
+    shell: bash
+    working_directory: scripts # Relative to the policy file
+    success_exit_codes: [0, 2]
+    stdout:
+      value: "ready"
+      match:
+        type: contains
+        case_sensitive: false
+    trusted_files:
+      - scripts/check.sh # Relative to the policy file (not to working_directory)
+```
+
+<details>
+  <summary><b>Options reference</b></summary><br>
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `run` | required | Command to run. A command with several lines stops at the first failing line (`cmd` only supports a single line, chain commands with `&&` instead). |
+| `shell` | `powershell` on Windows, `sh` on Linux and macOS | One of `sh`, `bash`, `cmd`, `powershell` or `pwsh`. The shell has to be installed. |
+| `working_directory` | directory of the policy file | Relative paths are resolved against the directory of the policy file. |
+| `env` | none | Additional environment variables. Numbers and booleans are converted to strings. Names starting with `POWERRULES_` are reserved. |
+| `timeout` | `60` | Maximum run time in seconds. Afterwards, the command and its child processes are terminated. `null` or `.inf` disables the limit. |
+| `success_exit_codes` | `[0]` | Exit codes which count as success. |
+| `stdout`, `stderr` | none | Expected output of the command. A different output counts as a failure. |
+| `trusted_files` | none | Files (e.g. scripts) the command depends on. They are verified before every run, see [Trust](#trust). Relative paths are resolved against the directory of the policy file. |
+
+All of `success_exit_codes`, `stdout` and `stderr` have to match. The output is compared after leading and trailing whitespace was removed.
+
+</details>
+
+<br>
+
+If the command cannot be started or exceeds its `timeout`, the condition cannot be evaluated and the evaluation stops.
+
+> [!WARNING]
+> Command conditions are always executed, **even with `--dry-run`**. Use [Trust](#trust) to detect modifications.
 
 ### Logical Conditions
 
@@ -178,29 +286,219 @@ Combine multiple conditions using `and`, `or`, and `not`.
         condition_3: ...
 ```
 
-### Power Actions
+### Actions
 
-Shutdown, sleep, hibernate, or reboot your computer.
+When a rule matches, its actions run one after another as commands in a shell.
 
 ```yaml
-# Shutdown on match
-- action:
-    type: shutdown
+actions:
+  # A failing backup does not prevent the remaining actions
+  - name: "Backup"
+    run: "backup.sh"
+    shell: bash
+    working_directory: scripts # Relative to the policy file
+    env:
+      TARGET: "/mnt/backup"
+    timeout: 600
+    success_exit_codes: [0, 3]
+    continue_on_error: true
+    trusted_files:
+      - scripts/backup.sh # Relative to the policy file (not to working_directory)
 
-# Reboot on match
-- action:
-    type: reboot
+  # Fail if the output does not contain "success"
+  - name: "Check"
+    run: "check.sh"
+    shell: bash
+    stdout:
+      value: "success"
+      match:
+        type: contains
+
+  # Start a command in the background without waiting for it
+  - run: "notify.sh"
+    shell: bash
+    wait: false
+    trusted_files:
+      - scripts/notify.sh
+
+  # Shutting down may require additional permissions on Linux
+  - name: "Shutdown"
+    run: "systemctl poweroff"
 ```
 
-### Continuous Evaluation
+<details>
+  <summary><b>Options reference</b></summary><br>
 
-Evaluate rules every 10 seconds. A matching rule is triggered only when it becomes the active match, avoiding repeated execution while the same rule remains matched.
+| Option | Default | Description |
+|--------|---------|-------------|
+| `run` | required | Command to run. A command with several lines stops at the first failing line (`cmd` only supports a single line, chain commands with `&&` instead). |
+| `name` | `Action N of M` | Name of the action, used in log messages. |
+| `shell` | `powershell` on Windows, `sh` on Linux and macOS | One of `sh`, `bash`, `cmd`, `powershell` or `pwsh`. The shell has to be installed. |
+| `working_directory` | directory of the policy file | Relative paths are resolved against the directory of the policy file. |
+| `env` | none | Additional environment variables. Numbers and booleans are converted to strings. Names starting with `POWERRULES_` are reserved. |
+| `timeout` | `60` | Maximum run time in seconds. Afterwards, the command and its child processes are terminated. `null` or `.inf` disables the limit. |
+| `success_exit_codes` | `[0]` | Exit codes which count as success. |
+| `stdout`, `stderr` | none | Expected output of the command. A different output counts as a failure. |
+| `wait` | `true` | `false` starts the command in the background. Cannot be combined with `timeout`, `success_exit_codes`, `stdout` or `stderr`. |
+| `continue_on_error` | `false` | Whether the remaining actions still run if this action fails. |
+| `trusted_files` | none | Files (e.g. scripts) the command depends on. They are verified before every run, see [Trust](#trust). Relative paths are resolved against the directory of the policy file. |
+
+<br>
+
+Options of `stdout` and `stderr`:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `value` | required | Text or regular expression the output is compared with. |
+| `match` | exact, case-sensitive | How the output is matched, see [Match Types](#match-types). |
+
+The output is compared after leading and trailing whitespace was removed.
+
+</details>
+
+<br>
+
+Commands can read the name of their rule and action from the environment variables `POWERRULES_RULE_NAME` and `POWERRULES_ACTION_NAME`.
+
+If an action fails (unexpected exit code or output, timeout or the command cannot be started), the remaining actions are skipped unless `continue_on_error` is set.
+
+> [!WARNING]
+> Commands run with the privileges of the user who started PowerRules, so treat policy files like scripts. Use [Trust](#trust) to detect modifications.
+
+### Policy Evaluation
+
+Evaluate a policy with `pwru policy run`. Without `--once`, the rules are evaluated every 10 seconds until PowerRules is stopped. A matching rule only runs its actions when it becomes the active match, not on every evaluation while it keeps matching.
 
 ```bash
+# Evaluate continuously
 pwru policy run
+
+# Evaluate every 30 seconds
+pwru policy run --interval 30
+
+# Evaluate once and exit
+pwru policy run --once
+
+# Only report which rule would match without running any actions
+pwru policy run --dry-run
 ```
 
-`--stop-on-match` can be used to stop the evaluation after the first match. The policy is loaded once at startup, so changes to the file require a restart.
+The interval is the time between the starts of two evaluations. If an evaluation takes longer, PowerRules logs a warning and starts the next one immediately.
+
+The policy is loaded once at startup, so changes to the file require a restart. Unless `--no-require-trust` is used, the policy has to be [trusted](#trust). `--dry-run` only skips this if the policy has no [command condition](#command-conditions), because the commands of conditions run in a dry run as well. If a condition cannot be evaluated, an action fails or a trusted file was modified, the evaluation stops.
+
+<details>
+  <summary><b>Options reference</b></summary><br>
+
+| Option | Applies to | Default | Description |
+|--------|------------|---------|-------------|
+| `--policy`, `-p` | all `policy` commands, `trust add`, `trust remove` | `powerrules.yaml` | Path to the PowerRules policy file. |
+| `--once` | `policy run` | off | Evaluate the policy once and then exit. |
+| `--interval` | `policy run` | `10` | Seconds between the starts of two evaluations. Has no effect with `--once`. |
+| `--stop-on-match` | `policy run` | off | Keep evaluating until the first rule matches, then stop. |
+| `--dry-run` | `policy run` | off | Evaluate the policy without executing any matching action. The commands of conditions still run. |
+| `--no-require-trust` | `policy run` | off | Run the policy even if it is not trusted or was modified since it was trusted, see [Trust](#trust). |
+
+</details>
+
+### Trust
+
+PowerRules remembers which policies you trust. A policy is identified by its path and trusted by its content (SHA-256 hash). Every modification makes it untrusted until you review it and trust it again. Files which actions or command conditions depend on (e.g. scripts or executables) are not detected automatically. To cover them as well, you can list them in the `trusted_files` configuration.
+
+```bash
+# Trust the current content of a policy and its trusted files
+pwru trust add --policy my-policy.yaml
+
+# Show all trusted policies and their current status
+pwru trust list
+
+# Remove the trust of a policy
+pwru trust remove --policy my-policy.yaml
+
+# Remove trusted policies whose policy file no longer exists
+pwru trust prune
+```
+
+Relative paths are resolved against the directory of the policy file:
+
+```yaml
+actions:
+  - run: "./backup.sh"
+    working_directory: scripts
+    trusted_files:
+      - scripts/backup.sh # Relative to the policy file (not to working_directory)
+```
+
+`pwru policy run` refuses to run untrusted policies by default. `--no-require-trust` can be used to override this behaviour. `--dry-run` skips the check, unless the policy contains a [command condition](#command-conditions).
+
+The policy and its trusted files are checked when the policy is loaded. Right before an action or a command condition runs, its `trusted_files` are checked again. The trust store is saved in `~/.powerrules/trust.json`.
+
+<details>
+  <summary><b>Options reference</b></summary><br>
+
+| Command | Options | Description |
+|---------|---------|-------------|
+| `trust add` | `--policy` | Trust the current content of the policy and its trusted files. An invalid policy or an unreadable file cannot be trusted. |
+| `trust remove` | `--policy` | Remove the trust of the policy. |
+| `trust list` | `--trusted`, `--modified`, `--missing` | List all trusted policies and their current status. Several filters can be combined, a policy is shown if it matches at least one of them. |
+| `trust prune` | `--dry-run`, `--yes`, `-y` | Remove trusted policies whose policy file no longer exists. `--dry-run` only shows what would be removed, `--yes` skips the confirmation. |
+
+<br>
+
+Trust status of the policy and its files:
+
+| Status | Description |
+|--------|-------------|
+| `trusted` | The content is unchanged since it was trusted. |
+| `unknown` | The policy or file was never trusted. |
+| `modified` | The content changed since it was trusted. |
+| `missing` | The file cannot be read. |
+
+A policy only counts as trusted if the policy and all of its trusted files are trusted.
+
+</details>
+
+<br>
+
+> [!WARNING]
+> Trust only covers the policy and its `trusted_files`. Programs started by commands are not checked and the trust store is only protected by the permissions of your user account.
+
+### Logging
+
+All `policy` and `trust` commands accept the following logging options:
+
+```bash
+pwru policy run --log-level DEBUG --log-file my-log.log
+```
+
+Messages are shown on the console and written to a rotating log file. Commands of actions or command conditions and their output are only logged on `DEBUG` level.
+
+<details>
+  <summary><b>Options reference</b></summary><br>
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--log-level` | `INFO` | Minimum log level shown on the console and written to the log file. One of `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
+| `--log-file` | `powerrules.log` | Path to the rotating log file. |
+| `--log-level-file` | value of `--log-level` | Minimum log level written to the log file. |
+
+</details>
+
+### Exit Codes
+
+`pwru` reports the result of a command via its exit code.
+
+<details>
+  <summary><b>Exit code reference</b></summary><br>
+
+| Exit code | Meaning | Examples |
+|-----------|---------|----------|
+| `0` | Success. | The policy is valid, was evaluated or no rule matched. |
+| `1` | Runtime error. | A condition cannot be evaluated, an action fails, the trust store cannot be read or written, an unexpected error occurred or a confirmation was declined (`trust prune`). |
+| `2` | Policy error or invalid usage. | The policy file was not found, contains invalid YAML or fails validation. Invalid command line options also use this code. |
+| `3` | Trust error. | The policy or one of its `trusted_files` is not trusted, was modified or cannot be read, see [Trust](#trust). |
+
+</details>
 
 ## Supported Platforms
 
@@ -208,7 +506,7 @@ pwru policy run
 |----------|-----------------------| ----- |
 | Windows 10/11 | [powerrules-windows-x86_64.exe](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-windows-x86_64.exe) | Window conditions only work when PowerRules runs in the logged-in user's session. |
 | Linux | [powerrules-linux-x86_64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-linux-x86_64)<br>[powerrules-linux-arm64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-linux-arm64) | Window conditions require an X11 session (Wayland is currently not supported). |
-| macOS | [powerrules-macos-arm64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-macos-arm64) | Hibernation action is not supported. |
+| macOS | [powerrules-macos-arm64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-macos-arm64) | Window conditions require the screen recording permission. |
 
 **Platform independent via pip:**
 ```bash

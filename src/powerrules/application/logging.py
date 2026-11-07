@@ -1,9 +1,12 @@
 """Central logging configuration for PowerRules."""
 
 import logging
+from collections.abc import Mapping
 from enum import StrEnum
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from types import MappingProxyType
+from typing import Final
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -24,6 +27,22 @@ _FILE_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 # instead of binding to a fixed stream captured at import/construction time
 console = Console(width=200)
 error_console = Console(stderr=True, width=200)
+
+# Log records with this extra attribute are only written to the log file, not to the console
+_FILE_ONLY_ATTRIBUTE = "file_only"
+FILE_ONLY_EXTRA: Final[Mapping[str, object]] = MappingProxyType(
+    {_FILE_ONLY_ATTRIBUTE: True}
+)
+
+
+def _is_below_warning(record: logging.LogRecord) -> bool:
+    """Return whether a log record belongs to stdout, since "WARNING" and above are written to stderr."""
+    return record.levelno < logging.WARNING
+
+
+def _is_shown_on_console(record: logging.LogRecord) -> bool:
+    """Return whether a log record is meant for the console (and not only for the log file)."""
+    return not getattr(record, _FILE_ONLY_ATTRIBUTE, False)
 
 
 class LogLevel(StrEnum):
@@ -79,14 +98,16 @@ def _build_stdout_handler(console_level_number: int) -> logging.Handler:
         markup=False,
         rich_tracebacks=True,
     )
-    handler.addFilter(lambda record: record.levelno < logging.WARNING)
+    # A handler level is only a lower limit, so the upper limit is a filter (otherwise warnings would appear on stdout and stderr)
+    handler.addFilter(_is_below_warning)
+    handler.addFilter(_is_shown_on_console)
 
     return handler
 
 
 def _build_stderr_handler(console_level_number: int) -> logging.Handler:
     """Build the rich-formatted handler which writes "WARNING" and above to stderr."""
-    return RichHandler(
+    handler = RichHandler(
         console=error_console,
         level=max(console_level_number, logging.WARNING),
         show_time=False,
@@ -94,6 +115,9 @@ def _build_stderr_handler(console_level_number: int) -> logging.Handler:
         markup=False,
         rich_tracebacks=True,
     )
+    handler.addFilter(_is_shown_on_console)
+
+    return handler
 
 
 def _build_file_handler(log_file: Path, file_level_number: int) -> logging.Handler:

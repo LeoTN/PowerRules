@@ -24,7 +24,7 @@
             "required": [
                 "name",
                 "conditions",
-                "action"
+                "actions"
             ],
             "properties": {
                 "name": {
@@ -40,9 +40,13 @@
                     "$ref": "#/$defs/condition",
                     "description": "Condition that must be satisfied for the rule to match."
                 },
-                "action": {
-                    "$ref": "#/$defs/action",
-                    "description": "Action to perform when the rule matches."
+                "actions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "Actions which are executed in order when the rule matches. If an action fails, the remaining actions are skipped and the evaluation stops, unless 'continue_on_error' is set for the failing action.",
+                    "items": {
+                        "$ref": "#/$defs/action"
+                    }
                 }
             }
         },
@@ -120,6 +124,17 @@
                         "window": {
                             "$ref": "#/$defs/windowCondition",
                             "description": "Condition based on the presence of a window."
+                        }
+                    }
+                },
+                {
+                    "required": [
+                        "command"
+                    ],
+                    "properties": {
+                        "command": {
+                            "$ref": "#/$defs/commandCondition",
+                            "description": "Condition based on the result of a command."
                         }
                     }
                 }
@@ -287,7 +302,6 @@
                 },
                 "exists": {
                     "type": "boolean",
-                    "default": true,
                     "description": "Whether the window is expected to exist."
                 },
                 "match": {
@@ -305,10 +319,11 @@
                     "type": "string",
                     "enum": [
                         "exact",
-                        "regex"
+                        "regex",
+                        "contains"
                     ],
                     "default": "exact",
-                    "description": "Whether the match should be exact or use a regular expression."
+                    "description": "Whether the match should be exact, use a regular expression (full-string match, '.' also matches line breaks) or check whether the value contains the text."
                 },
                 "case_sensitive": {
                     "type": "boolean",
@@ -317,22 +332,173 @@
                 }
             }
         },
-        "action": {
+        "outputMatch": {
             "type": "object",
             "additionalProperties": false,
+            "description": "Expected output of a command. The output is compared after leading and trailing whitespace was removed.",
             "required": [
-                "type"
+                "value"
             ],
             "properties": {
-                "type": {
+                "value": {
+                    "type": "string",
+                    "description": "Text or regular expression the output is compared with."
+                },
+                "match": {
+                    "$ref": "#/$defs/match",
+                    "description": "Defines how the output should be matched."
+                }
+            }
+        },
+        "commandOptions": {
+            "type": "object",
+            "description": "Options which are shared by actions and command conditions.",
+            "required": [
+                "run"
+            ],
+            "properties": {
+                "run": {
+                    "type": "string",
+                    "pattern": "\\S",
+                    "description": "Command which is run in the configured shell."
+                },
+                "shell": {
                     "type": "string",
                     "enum": [
-                        "shutdown",
-                        "sleep",
-                        "hibernate",
-                        "reboot"
+                        "sh",
+                        "bash",
+                        "cmd",
+                        "powershell",
+                        "pwsh"
                     ],
-                    "description": "Action to perform when the rule matches."
+                    "description": "Shell used to run the command. Defaults to 'powershell' on Windows and 'sh' on Linux and macOS."
+                },
+                "working_directory": {
+                    "type": "string",
+                    "pattern": "\\S",
+                    "description": "Directory the command is run in. Relative paths are resolved against the directory of the policy file, which is also the default."
+                },
+                "env": {
+                    "type": "object",
+                    "description": "Additional environment variables for the command. Names starting with POWERRULES_ are reserved.",
+                    "propertyNames": {
+                        "pattern": "^(?![Pp][Oo][Ww][Ee][Rr][Rr][Uu][Ll][Ee][Ss]_)[^=]+$"
+                    },
+                    "additionalProperties": {
+                        "type": [
+                            "string",
+                            "number",
+                            "boolean"
+                        ]
+                    }
+                },
+                "timeout": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "exclusiveMinimum": 0,
+                    "default": 60,
+                    "description": "Maximum run time in seconds. After that, the command including its child processes is terminated and the action counts as failed (a command condition cannot be evaluated). Use null (or .inf) for no time limit. For actions, it cannot be combined with 'wait: false'."
+                },
+                "success_exit_codes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "default": [
+                        0
+                    ],
+                    "description": "Exit codes which count as success. For actions, it cannot be combined with 'wait: false'.",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "stdout": {
+                    "$ref": "#/$defs/outputMatch",
+                    "description": "Expected standard output. For actions, it cannot be combined with 'wait: false'."
+                },
+                "stderr": {
+                    "$ref": "#/$defs/outputMatch",
+                    "description": "Expected error output. For actions, it cannot be combined with 'wait: false'."
+                },
+                "trusted_files": {
+                    "type": "array",
+                    "description": "Files (e.g. scripts) the command depends on. Relative paths are resolved against the directory of the policy file. Their digests are stored by 'trust add' and verified before every run of the command.",
+                    "items": {
+                        "type": "string",
+                        "pattern": "\\S"
+                    }
+                }
+            }
+        },
+        "commandCondition": {
+            "type": "object",
+            "description": "Runs a command. The condition is satisfied if the exit code is one of 'success_exit_codes' (default 0) and the configured 'stdout' and 'stderr' match. A command which does not match is no error, a command which cannot be started or exceeds the timeout is.",
+            "allOf": [
+                {
+                    "$ref": "#/$defs/commandOptions"
+                }
+            ],
+            "unevaluatedProperties": false
+        },
+        "action": {
+            "type": "object",
+            "allOf": [
+                {
+                    "$ref": "#/$defs/commandOptions"
+                }
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "pattern": "\\S",
+                    "description": "Name of the action, used in log messages."
+                },
+                "wait": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Whether to wait for the command to finish. If false, the command is started in the background."
+                },
+                "continue_on_error": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Whether the remaining actions of the rule are still executed if this action fails."
+                }
+            },
+            "unevaluatedProperties": false,
+            "if": {
+                "required": [
+                    "wait"
+                ],
+                "properties": {
+                    "wait": {
+                        "const": false
+                    }
+                }
+            },
+            "then": {
+                "not": {
+                    "anyOf": [
+                        {
+                            "required": [
+                                "timeout"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "success_exit_codes"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "stdout"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "stderr"
+                            ]
+                        }
+                    ]
                 }
             }
         }

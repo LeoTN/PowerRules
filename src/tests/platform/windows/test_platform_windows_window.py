@@ -55,8 +55,16 @@ def win32_ctypes() -> Iterator[None]:
         yield
 
 
-def _set_window_station_flags(user32: Mock, flags: int | None) -> None:
-    """Simulate the flags of the window station. None simulates a failing query."""
+def set_window_station_flags(
+    user32: Mock,
+    flags: int | None,
+) -> None:
+    """Simulate the flags of the window station which the mocked "user32" reports.
+
+    Args:
+        user32: Mocked "user32.dll".
+        flags: Flags of the window station. None simulates a failing query.
+    """
 
     def get_information(
         _station: object,
@@ -85,7 +93,7 @@ def test_windows_window_provider_is_available_on_interactive_session(
     provider: WindowsWindowProvider,
     user32: Mock,
 ) -> None:
-    _set_window_station_flags(user32, _WSF_VISIBLE)
+    set_window_station_flags(user32, _WSF_VISIBLE)
 
     assert provider.is_available is True
 
@@ -94,7 +102,7 @@ def test_windows_window_provider_is_not_available_on_non_interactive_session(
     provider: WindowsWindowProvider,
     user32: Mock,
 ) -> None:
-    _set_window_station_flags(user32, 0)
+    set_window_station_flags(user32, 0)
 
     assert provider.is_available is False
 
@@ -103,7 +111,7 @@ def test_windows_window_provider_is_not_available_when_window_station_query_fail
     provider: WindowsWindowProvider,
     user32: Mock,
 ) -> None:
-    _set_window_station_flags(user32, None)
+    set_window_station_flags(user32, None)
 
     assert provider.is_available is False
 
@@ -113,7 +121,7 @@ def test_windows_window_provider_logs_unavailable_warning_only_once(
     user32: Mock,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    _set_window_station_flags(user32, 0)
+    set_window_station_flags(user32, 0)
 
     with caplog.at_level(logging.WARNING):
         assert provider.is_available is False

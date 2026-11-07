@@ -1,6 +1,8 @@
+import math
 import re
 from datetime import date, datetime, time
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Literal, TypeVar
 
 from pydantic import (
@@ -9,14 +11,21 @@ from pydantic import (
     Discriminator,
     Field,
     StrictBool,
+    StrictFloat,
+    StrictInt,
     Tag,
     ValidationInfo,
     field_validator,
     model_validator,
 )
 
+from powerrules.actions.command import (
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    RESERVED_ENVIRONMENT_PREFIX,
+)
 from powerrules.conditions.datetime import Month, Weekday
 from powerrules.conditions.matcher import MatchType
+from powerrules.providers.command import Shell
 
 EnumType = TypeVar("EnumType", bound=StrEnum)
 
@@ -304,6 +313,209 @@ class WindowConditionConfiguration(BaseModel):
     match: MatchConfiguration = Field(default_factory=MatchConfiguration)
 
 
+class OutputMatchConfiguration(BaseModel):
+    """Configuration for the expected output (stdout or stderr) of a command."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: str
+    match: MatchConfiguration = Field(default_factory=MatchConfiguration)
+
+
+class CommandConfiguration(BaseModel):
+    """Configuration for a command which is run in a shell.
+
+    This is the common base of actions and command conditions.
+    Unset optional values fall back to their defaults when the command is built.
+    For example, the default shell depends on the operating system.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    run: str
+    shell: Shell | None = None
+    working_directory: Path | None = None
+    # The values may be secrets, so they are excluded from the representation of the model
+    env: dict[str, str] = Field(default_factory=dict, repr=False)
+    # None means that the command may run without a time limit
+    timeout: StrictInt | StrictFloat | None = DEFAULT_COMMAND_TIMEOUT_SECONDS
+    success_exit_codes: list[StrictInt] = Field(
+        default_factory=lambda: [0], min_length=1
+    )
+    # Expected output, it is compared after leading and trailing whitespace was removed
+    stdout: OutputMatchConfiguration | None = None
+    stderr: OutputMatchConfiguration | None = None
+    # Files (e.g. scripts) the command depends on, relative paths are resolved against the directory of the policy
+    trusted_files: list[Path] = Field(default_factory=list)
+
+    # "name" only exists in subclasses (actions), so the field is not checked here
+    @field_validator("run", "name", check_fields=False)
+    @classmethod
+    def validate_not_blank(cls, value: str | None, info: ValidationInfo) -> str | None:
+        """Validate that a configured text is not empty or whitespace only.
+
+        Args:
+            value: Configured text, or None if not configured.
+            info: Validation information containing the name of the field.
+
+        Returns:
+            The validated text.
+
+        Raises:
+            ValueError: If the text is blank.
+        """
+        if value is not None and not value.strip():
+            raise ValueError(f"The '{info.field_name}' value must not be blank")
+
+        return value
+
+    @model_validator(mode="after")
+    def validate_cmd_command_is_single_line(self) -> "CommandConfiguration":
+        """Validate that a command for "cmd" has only one line.
+
+        "cmd.exe /c" ignores everything after the first line break, so further lines would be skipped silently.
+
+        Returns:
+            The validated configuration.
+
+        Raises:
+            ValueError: If the shell is "cmd" and the command has several lines.
+        """
+        if self.shell is Shell.CMD and len(self.run.strip().splitlines()) > 1:
+            raise ValueError(
+                "A command for the shell 'cmd' must be a single line, because cmd.exe ignores all following lines (chain commands with '&&' or '&' instead)"
+            )
+
+        return self
+
+    @field_validator("working_directory", mode="before")
+    @classmethod
+    def validate_working_directory_not_blank(cls, value: object) -> object:
+        """Validate that a configured working directory is not blank.
+
+        An empty string would otherwise silently become the current directory.
+
+        Args:
+            value: Configured working directory.
+
+        Returns:
+            The unchanged value, so the regular validation converts it to a path.
+
+        Raises:
+            ValueError: If the working directory is a blank string.
+        """
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("The 'working_directory' value must not be blank")
+
+        return value
+
+    @field_validator("env", mode="before")
+    @classmethod
+    def convert_environment_values_to_strings(cls, value: object) -> object:
+        """Convert numbers and booleans of the environment variables to strings.
+
+        YAML turns an unquoted value like 1 or true into a number or boolean, but environment variables are always strings.
+
+        Args:
+            value: Configured environment variables.
+
+        Returns:
+            The variables with converted values. Anything else is returned unchanged, so it is rejected by the regular validation.
+        """
+        if not isinstance(value, dict):
+            return value
+
+        return {
+            variable_name: _convert_environment_value(variable_value)
+            for variable_name, variable_value in value.items()
+        }
+
+    @field_validator("env")
+    @classmethod
+    def validate_environment_names(cls, value: dict[str, str]) -> dict[str, str]:
+        """Validate the names of the environment variables.
+
+        Args:
+            value: Configured environment variables.
+
+        Returns:
+            The validated environment variables.
+
+        Raises:
+            ValueError: If a name is empty, contains "=" or uses the reserved prefix.
+        """
+        for variable_name in value:
+            if not variable_name or "=" in variable_name:
+                raise ValueError(
+                    f"Invalid environment variable name '{variable_name}', it must not be empty or contain '='"
+                )
+
+            # Environment variable names are case-insensitive on Windows
+            if variable_name.upper().startswith(RESERVED_ENVIRONMENT_PREFIX):
+                raise ValueError(
+                    f"The environment variable '{variable_name}' is reserved, names starting with '{RESERVED_ENVIRONMENT_PREFIX}' are set by PowerRules"
+                )
+
+        return value
+
+    @field_validator("timeout")
+    @classmethod
+    def validate_timeout(cls, value: float | None) -> float | None:
+        """Validate that the timeout is positive and normalize an infinite timeout.
+
+        Args:
+            value: Configured timeout in seconds, or None for no time limit.
+
+        Returns:
+            The validated timeout. An infinite timeout (YAML ".inf") is returned as None.
+
+        Raises:
+            ValueError: If the timeout is not greater than zero.
+        """
+        if value is None:
+            return None
+
+        # "not value > 0" also rejects NaN. This has to happen before the check for infinity
+        if not value > 0:
+            raise ValueError(
+                "'timeout' must be greater than zero (use null for no time limit)"
+            )
+
+        # An infinite timeout means "no time limit", which is what None expresses.
+        # Passing "inf" on would fail later in the subprocess call, because it is not a usable wait time
+        if math.isinf(value):
+            return None
+
+        return value
+
+    @field_validator("trusted_files", mode="before")
+    @classmethod
+    def validate_trusted_files_not_blank(cls, value: object) -> object:
+        """Validate that no configured trusted file is blank.
+
+        An empty string would otherwise silently become the directory of the policy.
+
+        Args:
+            value: Configured trusted files.
+
+        Returns:
+            The unchanged value, so the regular validation converts it to paths.
+
+        Raises:
+            ValueError: If a trusted file is a blank string.
+        """
+        if isinstance(value, list) and any(
+            isinstance(item, str) and not item.strip() for item in value
+        ):
+            raise ValueError("The 'trusted_files' entries must not be blank")
+
+        return value
+
+
+class CommandConditionConfiguration(CommandConfiguration):
+    """Configuration for a command condition. The condition matches if the exit code and the configured outputs match."""
+
+
 class ConditionConfiguration(BaseModel):
     """Configuration for a condition tree."""
 
@@ -330,6 +542,7 @@ class ConditionConfiguration(BaseModel):
     process: ProcessConditionConfiguration | None = None
     datetime: DateTimeConditionConfiguration | None = None
     window: WindowConditionConfiguration | None = None
+    command: CommandConditionConfiguration | None = None
 
     @model_validator(mode="after")
     def validate_variant(self) -> "ConditionConfiguration":
@@ -342,12 +555,13 @@ class ConditionConfiguration(BaseModel):
                 self.process,
                 self.datetime,
                 self.window,
+                self.command,
             )
         )
 
         if configured_variants != 1:
             raise ValueError(
-                "A condition must define exactly one of 'and', 'or', 'not', 'process', 'datetime' or 'window'"
+                "A condition must define exactly one of 'and', 'or', 'not', 'process', 'datetime', 'window' or 'command'"
             )
 
         if self.and_conditions is not None and len(self.and_conditions) < 2:
@@ -358,18 +572,81 @@ class ConditionConfiguration(BaseModel):
 
         return self
 
+    def _get_child_conditions(self) -> tuple["ConditionConfiguration", ...]:
+        """Return the direct child conditions of a logical condition, or an empty tuple for any other condition."""
+        return (
+            *(self.and_conditions or ()),
+            *(self.or_conditions or ()),
+            *((self.not_condition,) if self.not_condition is not None else ()),
+        )
 
-class ActionConfiguration(BaseModel):
-    """Configuration for an action."""
+    def get_trusted_files(self) -> tuple[Path, ...]:
+        """Return the trusted files of all command conditions of the condition tree.
 
-    model_config = ConfigDict(extra="forbid")
+        Returns:
+            The configured paths in the order of the policy. Relative paths are not resolved
+            and duplicates are not removed, see "resolve_trusted_files()".
+        """
+        if self.command is not None:
+            return tuple(self.command.trusted_files)
 
-    type: Literal[
-        "shutdown",
-        "sleep",
-        "hibernate",
-        "reboot",
-    ]
+        return tuple(
+            file
+            for child in self._get_child_conditions()
+            for file in child.get_trusted_files()
+        )
+
+    def has_command_condition(self) -> bool:
+        """Return whether the condition tree contains a command condition.
+
+        Returns:
+            True if at least one command condition exists, otherwise False.
+        """
+        return self.command is not None or any(
+            child.has_command_condition() for child in self._get_child_conditions()
+        )
+
+
+class ActionConfiguration(CommandConfiguration):
+    """Configuration for an action which runs a command.
+
+    Unset optional values fall back to their defaults when the action is built.
+    For example, the default shell depends on the operating system.
+    """
+
+    name: str | None = None
+    wait: StrictBool = True
+    continue_on_error: StrictBool = False
+
+    @model_validator(mode="after")
+    def validate_background_options(self) -> "ActionConfiguration":
+        """Validate that options which need a finished command are not combined with 'wait: false'.
+
+        Without waiting there is neither an exit code, an output nor a point in time at which the timeout could apply.
+        Only explicitly configured options are rejected, not the defaults.
+
+        Returns:
+            The validated configuration.
+
+        Raises:
+            ValueError: If 'timeout', 'success_exit_codes', 'stdout' or 'stderr' is configured together with 'wait: false'.
+        """
+        if self.wait:
+            return self
+
+        conflicting_options = sorted(
+            {"timeout", "success_exit_codes", "stdout", "stderr"}
+            & self.model_fields_set
+        )
+
+        if conflicting_options:
+            option_names = ", ".join(f"'{name}'" for name in conflicting_options)
+
+            raise ValueError(
+                f"{option_names} cannot be combined with 'wait: false' because the command is not waited for"
+            )
+
+        return self
 
 
 class RuleConfiguration(BaseModel):
@@ -380,7 +657,7 @@ class RuleConfiguration(BaseModel):
     name: str
     enabled: StrictBool = True
     conditions: ConditionConfiguration
-    action: ActionConfiguration
+    actions: list[ActionConfiguration] = Field(min_length=1)
 
 
 class RuleSetConfiguration(BaseModel):
@@ -389,6 +666,36 @@ class RuleSetConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rules: list[RuleConfiguration]
+
+    def get_trusted_files(self) -> tuple[Path, ...]:
+        """Return the trusted files of all rules, including the disabled ones.
+
+        The files of the conditions of a rule come before the files of its actions.
+
+        Returns:
+            The configured paths in the order of the policy. Relative paths are not resolved
+            and duplicates are not removed, see "resolve_trusted_files()".
+        """
+        return tuple(
+            file
+            for rule in self.rules
+            for file in (
+                *rule.conditions.get_trusted_files(),
+                *(
+                    action_file
+                    for action in rule.actions
+                    for action_file in action.trusted_files
+                ),
+            )
+        )
+
+    def has_command_condition(self) -> bool:
+        """Return whether any rule, including the disabled ones, contains a command condition.
+
+        Returns:
+            True if at least one command condition exists, otherwise False.
+        """
+        return any(rule.conditions.has_command_condition() for rule in self.rules)
 
 
 def _parse_date(value: object) -> date:
@@ -537,5 +844,26 @@ def _match_enum_case_insensitive(enum_type: type[EnumType], value: object) -> ob
     for member in enum_type:
         if member.value.casefold() == value.casefold():
             return member
+
+    return value
+
+
+def _convert_environment_value(value: object) -> object:
+    """Convert a number or boolean of an environment variable to its string form.
+
+    Booleans use the YAML spelling ("true" and "false") instead of the Python one.
+
+    Args:
+        value: Configured value of an environment variable.
+
+    Returns:
+        The converted string, or the unchanged value if it is neither a number nor a boolean.
+    """
+    # A bool is also an int, so it has to be checked first
+    if isinstance(value, bool):
+        return "true" if value else "false"
+
+    if isinstance(value, int | float):
+        return str(value)
 
     return value

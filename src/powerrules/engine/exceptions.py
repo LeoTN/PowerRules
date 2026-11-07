@@ -18,3 +18,15 @@ class ActionExecutionError(PowerRulesError):
 
 class ConfigurationError(PowerRulesError):
     """Raised when a configuration cannot be converted into a rule set."""
+
+
+class PolicyNotTrustedError(PowerRulesError):
+    """Raised when a policy has to be trusted, but is not trusted yet or was modified since it was trusted."""
+
+
+class FileIntegrityError(PowerRulesError):
+    """Raised when a trusted file cannot be read, is not trusted yet or was modified since it was trusted."""
+
+
+class TrustStoreError(PowerRulesError):
+    """Raised when the trust store cannot be read or written."""

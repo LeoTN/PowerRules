@@ -1,23 +1,24 @@
+from collections.abc import Sequence
 from datetime import datetime, time
+from pathlib import Path
 
-from powerrules.actions.base import Action
-from powerrules.actions.power import (
-    HibernateAction,
-    RebootAction,
-    ShutdownAction,
-    SleepAction,
-)
+from powerrules.actions.command import CommandAction
+from powerrules.commands.runner import FilesVerifier
 from powerrules.conditions.base import Condition
+from powerrules.conditions.command import CommandCondition
 from powerrules.conditions.datetime import DateTimeCondition, DateTimeRange, TimeRange
+from powerrules.conditions.matcher import StringMatcher
 from powerrules.conditions.operators import AndCondition, NotCondition, OrCondition
 from powerrules.conditions.process import ProcessCondition
 from powerrules.conditions.window import WindowCondition
 from powerrules.config.models import (
     ActionConfiguration,
+    CommandConditionConfiguration,
     ConditionConfiguration,
     DateRangeConfiguration,
     DateTimeConditionConfiguration,
     DateTimeRangeConfiguration,
+    OutputMatchConfiguration,
     ProcessConditionConfiguration,
     RuleConfiguration,
     RuleSetConfiguration,
@@ -27,7 +28,7 @@ from powerrules.config.models import (
 from powerrules.engine.exceptions import ConfigurationError
 from powerrules.engine.models import Rule, RuleSet
 from powerrules.providers.clock import ClockProvider
-from powerrules.providers.power import PowerProvider
+from powerrules.providers.command import CommandProvider
 from powerrules.providers.process import ProcessProvider
 from powerrules.providers.window import WindowProvider
 
@@ -37,13 +38,32 @@ class ConfigurationBuilder:
         self,
         clock_provider: ClockProvider,
         process_provider: ProcessProvider,
-        power_provider: PowerProvider,
+        command_provider: CommandProvider,
         window_provider: WindowProvider,
+        base_directory: Path,
+        files_verifier: FilesVerifier | None = None,
+        condition_files_verifier: FilesVerifier | None = None,
     ):
+        """Create a builder for the rules of one policy.
+
+        Args:
+            clock_provider: Provider for the current date and time.
+            process_provider: Provider for the existing processes.
+            command_provider: Provider which runs the commands of the actions and the command conditions.
+            window_provider: Provider for the existing windows.
+            base_directory: Directory of the policy file. Commands run there by default,
+                and relative working directories of actions and conditions are resolved against it.
+            files_verifier: Called with the trusted files before an action runs. None skips the verification.
+            condition_files_verifier: Called with the trusted files before a command condition runs.
+                None skips the verification.
+        """
         self.clock_provider = clock_provider
         self.process_provider = process_provider
-        self.power_provider = power_provider
+        self.command_provider = command_provider
         self.window_provider = window_provider
+        self.base_directory = base_directory
+        self.files_verifier = files_verifier
+        self.condition_files_verifier = condition_files_verifier
 
     def build(self, configuration: RuleSetConfiguration) -> RuleSet:
         """Build a rule set from the validated configuration. This allows the rule engine to process the rules.
@@ -72,21 +92,37 @@ class ConfigurationBuilder:
         Returns:
             The executable rule.
         """
+        action_count = len(rule_configuration.actions)
+
         return Rule(
             name=rule_configuration.name,
             enabled=rule_configuration.enabled,
-            condition=self._build_condition(rule_configuration.conditions),
-            action=self._build_action(rule_configuration.action),
+            condition=self._build_condition(
+                rule_configuration.conditions, rule_configuration.name
+            ),
+            actions=tuple(
+                self._build_action(
+                    action_configuration,
+                    rule_name=rule_configuration.name,
+                    position=position,
+                    action_count=action_count,
+                )
+                for position, action_configuration in enumerate(
+                    rule_configuration.actions, start=1
+                )
+            ),
         )
 
     def _build_condition(
         self,
         condition_configuration: ConditionConfiguration,
+        rule_name: str,
     ) -> Condition:
         """Build a condition from its configuration.
 
         Args:
             condition_configuration: Configuration of the condition.
+            rule_name: Name of the rule the condition belongs to, used in messages of conditions which run commands.
 
         Returns:
             The executable condition.
@@ -94,7 +130,7 @@ class ConfigurationBuilder:
         if condition_configuration.and_conditions is not None:
             return AndCondition(
                 conditions=tuple(
-                    self._build_condition(condition)
+                    self._build_condition(condition, rule_name)
                     for condition in condition_configuration.and_conditions
                 )
             )
@@ -102,14 +138,16 @@ class ConfigurationBuilder:
         if condition_configuration.or_conditions is not None:
             return OrCondition(
                 conditions=tuple(
-                    self._build_condition(condition)
+                    self._build_condition(condition, rule_name)
                     for condition in condition_configuration.or_conditions
                 )
             )
 
         if condition_configuration.not_condition is not None:
             return NotCondition(
-                condition=self._build_condition(condition_configuration.not_condition)
+                condition=self._build_condition(
+                    condition_configuration.not_condition, rule_name
+                )
             )
 
         if condition_configuration.process is not None:
@@ -120,6 +158,11 @@ class ConfigurationBuilder:
 
         if condition_configuration.window is not None:
             return self._build_window_condition(condition_configuration.window)
+
+        if condition_configuration.command is not None:
+            return self._build_command_condition(
+                condition_configuration.command, rule_name
+            )
 
         raise ConfigurationError("Condition configuration does not contain a condition")
 
@@ -212,23 +255,122 @@ class ConfigurationBuilder:
             case_sensitive=configuration.match.case_sensitive,
         )
 
-    def _build_action(self, configuration: ActionConfiguration) -> Action:
+    def _build_command_condition(
+        self,
+        configuration: CommandConditionConfiguration,
+        rule_name: str,
+    ) -> CommandCondition:
+        """Build a command condition from its configuration.
+
+        Args:
+            configuration: Command condition configuration.
+            rule_name: Name of the rule the condition belongs to, used in messages.
+
+        Returns:
+            The executable command condition.
+        """
+        return CommandCondition(
+            command_provider=self.command_provider,
+            command=configuration.run,
+            working_directory=self._resolve_working_directory(
+                configuration.working_directory
+            ),
+            rule_name=rule_name,
+            timeout=configuration.timeout,
+            shell=configuration.shell,
+            environment=configuration.env,
+            success_exit_codes=configuration.success_exit_codes,
+            stdout_matcher=self._build_output_matcher(configuration.stdout),
+            stderr_matcher=self._build_output_matcher(configuration.stderr),
+            trusted_files=self._resolve_trusted_files(configuration.trusted_files),
+            files_verifier=self.condition_files_verifier,
+        )
+
+    def _build_action(
+        self,
+        configuration: ActionConfiguration,
+        rule_name: str,
+        position: int,
+        action_count: int,
+    ) -> CommandAction:
         """Build an action from its configuration.
 
         Args:
-            configuration: Action configuration.
+            configuration: Configuration of the action.
+            rule_name: Name of the rule the action belongs to.
+            position: Position of the action within its rule, starting at 1.
+            action_count: Number of actions of the rule.
 
         Returns:
             The executable action.
         """
-        match configuration.type:
-            case "shutdown":
-                return ShutdownAction(self.power_provider)
-            case "sleep":
-                return SleepAction(self.power_provider)
-            case "hibernate":
-                return HibernateAction(self.power_provider)
-            case "reboot":
-                return RebootAction(self.power_provider)
+        return CommandAction(
+            command_provider=self.command_provider,
+            command=configuration.run,
+            working_directory=self._resolve_working_directory(
+                configuration.working_directory
+            ),
+            name=(
+                configuration.name
+                if configuration.name is not None
+                else f"Action {position} of {action_count}"
+            ),
+            rule_name=rule_name,
+            shell=configuration.shell,
+            environment=configuration.env,
+            timeout=configuration.timeout,
+            success_exit_codes=configuration.success_exit_codes,
+            wait=configuration.wait,
+            continue_on_error=configuration.continue_on_error,
+            trusted_files=self._resolve_trusted_files(configuration.trusted_files),
+            files_verifier=self.files_verifier,
+            stdout_matcher=self._build_output_matcher(configuration.stdout),
+            stderr_matcher=self._build_output_matcher(configuration.stderr),
+        )
 
-        raise ConfigurationError(f"Unsupported action type '{configuration.type}'")
+    def _resolve_working_directory(self, working_directory: Path | None) -> Path:
+        """Resolve the configured working directory of a command.
+
+        Args:
+            working_directory: Configured working directory, or None if not configured.
+
+        Returns:
+            The base directory if nothing is configured, otherwise the configured directory.
+            An absolute working directory replaces the base directory when the paths are joined.
+        """
+        if working_directory is None:
+            return self.base_directory
+
+        return self.base_directory / working_directory
+
+    def _resolve_trusted_files(self, trusted_files: Sequence[Path]) -> tuple[Path, ...]:
+        """Resolve the configured trusted files of a command against the base directory.
+
+        Args:
+            trusted_files: Configured trusted files.
+
+        Returns:
+            The joined paths. They are not resolved here, the verifier resolves symbolic links on every check.
+        """
+        return tuple(self.base_directory / file for file in trusted_files)
+
+    @staticmethod
+    def _build_output_matcher(
+        configuration: OutputMatchConfiguration | None,
+    ) -> StringMatcher | None:
+        """Build the matcher for the expected output of a command.
+
+        Args:
+            configuration: Configuration of the expected output, or None if any output is accepted.
+
+        Returns:
+            The matcher, or None if no output is expected.
+        """
+        if configuration is None:
+            return None
+
+        return StringMatcher(
+            pattern=configuration.value,
+            match_type=configuration.match.type,
+            case_sensitive=configuration.match.case_sensitive,
+        )
