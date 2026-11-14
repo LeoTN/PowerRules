@@ -1,0 +1,9 @@
+/* Make links in grid cards expand to allow clicking anywhere on the card to follow the link */
+.md-typeset .grid.cards > ul > li {
+  position: relative;
+}
+.md-typeset .grid.cards > ul > li a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
