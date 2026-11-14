@@ -1,0 +1,42 @@
+[project]
+site_name = "PowerRules"
+site_description = "A rule-based command automation tool."
+site_author = "LeoTN"
+site_url = "https://leotn.github.io/PowerRules/"
+repo_url = "https://github.com/LeoTN/PowerRules"
+repo_name = "LeoTN/PowerRules"
+
+docs_dir = "docs"
+site_dir = "site"
+
+exclude_docs = """
+/templates/
+"""
+
+nav = [
+  { "Home" = "index.md" },
+  { "Getting Started" = "getting_started.md" },
+  { "Conditions" = [
+    { "Overview" = "conditions/index.md" },
+    { "Process" = "conditions/process.md" },
+    { "Window" = "conditions/window.md" },
+    { "Match Types" = "conditions/match_types.md" },
+    { "Datetime" = "conditions/datetime.md" },
+    { "Command" = "conditions/command.md" },
+    { "Logical" = "conditions/logical.md" },
+  ] },
+  { "Actions" = "actions.md" },
+  { "Policy Evaluation" = "policy_evaluation.md" },
+  { "Trust" = "trust.md" },
+  { "Logging" = "logging.md" },
+  { "Exit Codes" = "exit_codes.md" },
+  { "Platforms" = "platforms.md" },
+]
+
+[project.theme]
+features = [
+  "navigation.instant",
+  "navigation.top",
+  "content.code.copy",
+  "content.code.annotate",
+]
