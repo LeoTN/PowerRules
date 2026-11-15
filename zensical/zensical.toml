@@ -23,7 +23,6 @@ nav = [
     { "Overview" = "conditions/index.md" },
     { "Process" = "conditions/process.md" },
     { "Window" = "conditions/window.md" },
-    { "Match Types" = "conditions/match_types.md" },
     { "Datetime" = "conditions/datetime.md" },
     { "Command" = "conditions/command.md" },
     { "Logical" = "conditions/logical.md" },
@@ -31,9 +30,13 @@ nav = [
   { "Actions" = "actions.md" },
   { "Policy Evaluation" = "policy_evaluation.md" },
   { "Trust" = "trust.md" },
-  { "Logging" = "logging.md" },
-  { "Exit Codes" = "exit_codes.md" },
-  { "Platforms" = "platforms.md" },
+  { "Reference" = [
+    { "Match Types" = "reference/match_types.md" },
+    { "Command Options" = "reference/command_options.md" },
+    { "Logging" = "reference/logging.md" },
+    { "Exit Codes" = "reference/exit_codes.md" },
+    { "Platforms" = "reference/platforms.md" },
+  ] },
 ]
 
 [project.theme]
