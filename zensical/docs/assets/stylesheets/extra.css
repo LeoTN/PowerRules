@@ -7,3 +7,21 @@
   position: absolute;
   inset: 0;
 }
+
+/* Never break option names (inline code) in the first column of a table */
+.md-typeset table:not([class]) td:first-child code {
+  white-space: nowrap;
+}
+
+/* Small label next to an option, e.g. for options which only exist for actions */
+.option-tag {
+  display: inline-block;
+  padding: 0 0.5em;
+  border-radius: 0.2rem;
+  font-size: 0.7em;
+  font-weight: 700;
+  vertical-align: middle;
+  white-space: nowrap;
+  background-color: var(--md-default-fg-color--lightest);
+  color: var(--md-default-fg-color--light);
+}
