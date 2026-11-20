@@ -35,7 +35,6 @@ nav = [
     { "Command Options" = "reference/command_options.md" },
     { "Logging" = "reference/logging.md" },
     { "Exit Codes" = "reference/exit_codes.md" },
-    { "Platforms" = "reference/platforms.md" },
   ] },
 ]
 

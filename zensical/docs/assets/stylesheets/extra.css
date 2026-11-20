@@ -8,8 +8,8 @@
   inset: 0;
 }
 
-/* Never break option names (inline code) in the first column of a table */
-.md-typeset table:not([class]) td:first-child code {
+/* Never break inline code in table cells */
+.md-typeset table:not([class]) code {
   white-space: nowrap;
 }
 

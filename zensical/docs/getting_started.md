@@ -16,6 +16,12 @@ Create, validate, trust and run your first policy.
 
     Download the binary for your platform from the [latest release](https://github.com/LeoTN/PowerRules/releases/latest).
 
+    | Platform      | Standalone Binary                                                                                                                                                                                                                |
+    | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | Windows 10/11 | [powerrules-windows-x86_64.exe](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-windows-x86_64.exe)                                                                                                      |
+    | Linux         | [powerrules-linux-x86_64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-linux-x86_64)<br>[powerrules-linux-arm64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-linux-arm64) |
+    | macOS         | [powerrules-macos-arm64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-macos-arm64)                                                                                                                    |
+
 !!! note
 
     `pwru` is installed by pip. When using a standalone binary, call it by its file name instead.
