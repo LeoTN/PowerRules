@@ -18,7 +18,7 @@ rules:
           type: regex
           case_sensitive: false
     actions:
-      - run: "echo Firefox window is open
+      - run: "echo Firefox window is open"
 ```
 
 ## Options

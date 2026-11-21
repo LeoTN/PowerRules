@@ -47,7 +47,7 @@ flowchart TD
 
 ## Details
 
-- A rule runs its actions when it becomes the active match, not on every evaluation while it keeps matching. If no rule matches in between, the rule runs its actions again the next time it matches.
+- A rule runs its actions when it becomes the active match, not on every evaluation while it keeps matching. If another rule or no rule matches in between, the rule runs its actions again the next time it matches.
 - The interval is the time between the starts of two evaluations. If an evaluation takes longer, PowerRules logs a warning and starts the next one immediately.
 - The policy is loaded once at startup, so changes to the file require a restart.
 - Unless `--no-require-trust` is used, the policy has to be [trusted](trust.md). `--dry-run` only skips this if the policy has no [command condition](conditions/command.md), because the commands of command conditions run in a dry run as well.

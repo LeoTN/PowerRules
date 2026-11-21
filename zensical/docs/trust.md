@@ -8,7 +8,7 @@
 
 ``` bash
 # Trust the current content of a policy and its trusted files
-pwru trust add --policy my-policy.yaml1
+pwru trust add --policy my-policy.yaml
 
 # Show all trusted policies and their current status
 pwru trust list

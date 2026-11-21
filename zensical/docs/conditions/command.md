@@ -43,7 +43,7 @@ Command conditions use the [command options](../reference/command_options.md).
 - Commands and their output are only logged on `DEBUG` level.
 - [`and` and `or`](logical.md) stop at the first decisive result. Put cheap conditions first, so the command only runs when needed.
 
-See [Actions and conditions](../reference/command_options.md#actions-vs-command-conditions) for the differences to the commands of actions.
+See [Actions vs. command conditions](../reference/command_options.md#actions-vs-command-conditions) for the differences to the commands of actions.
 
 ## Related
 
