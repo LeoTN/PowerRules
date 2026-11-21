@@ -1,0 +1,102 @@
+# Getting Started
+
+Create, validate, trust and run your first policy.
+
+## Installation
+
+=== "pip"
+
+    Requires Python 3.11 or newer.
+
+    ``` bash
+    pip install powerrules
+    ```
+
+=== "Standalone binary"
+
+    Download the binary for your platform from the [latest release](https://github.com/LeoTN/PowerRules/releases/latest).
+
+    | Platform      | Standalone Binary                                                                                                                                                                                                                |
+    | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | Windows 10/11 | [powerrules-windows-x86_64.exe](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-windows-x86_64.exe)                                                                                                      |
+    | Linux         | [powerrules-linux-x86_64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-linux-x86_64)<br>[powerrules-linux-arm64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-linux-arm64) |
+    | macOS         | [powerrules-macos-arm64](https://github.com/LeoTN/PowerRules/releases/latest/download/powerrules-macos-arm64)                                                                                                                    |
+
+!!! note
+
+    `pwru` is installed by pip. When using a standalone binary, call it by its file name instead.
+
+Check the version:
+
+``` bash
+pwru --version
+```
+
+## Policy
+
+### Creation
+
+Create a file named `my-policy.yaml`:
+
+``` yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/LeoTN/PowerRules/main/assets/schema/powerrules_policy.schema.json
+# (1)!
+rules:
+  # Match while no process named "powerrules-demo" is running
+  - name: "No demo process is running"
+    conditions:
+      process:
+        name: "powerrules-demo"
+        exists: false
+    actions:
+      - name: "Say hello"
+        run: "echo Hello from PowerRules"
+```
+
+1. Editors with YAML support can use this schema for validation and autocompletion.
+
+### Validation
+
+``` bash
+pwru policy validate --policy my-policy.yaml
+```
+
+### Trust
+
+Review the policy and trust it:
+
+``` bash
+pwru trust add --policy my-policy.yaml
+```
+
+PowerRules refuses to run policies which are not trusted or were modified since, see [Trust](trust.md).
+
+### Execution
+
+Use `--once` to evaluate the policy a single time:
+
+``` bash
+pwru policy run --once --policy my-policy.yaml
+```
+
+``` { .pwsh .no-copy }
+INFO     Running policy 'my-policy.yaml' once...
+INFO     Policy '/path/to/my-policy.yaml' is trusted
+INFO     Running action 'Say hello'
+INFO     Action 'Say hello' finished with exit code 0
+INFO     Rule 'No demo process is running' matched, executed actions: 'Say hello'
+```
+
+## Related
+
+<div class="grid cards" markdown>
+
+--8<-- "related_grid.md:policy_evaluation"
+
+--8<-- "related_grid.md:conditions"
+
+--8<-- "related_grid.md:actions"
+
+--8<-- "related_grid.md:trust"
+
+</div>

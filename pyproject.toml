@@ -63,7 +63,8 @@ pwru = "powerrules.cli.app:app"
 dev = [
     "nuitka[onefile]>=4.0,<5.0",
     "pytest>=9.0,<10.0",
-    "ruff>=0.16.4,<0.17.0"
+    "ruff>=0.16.4,<0.17.0",
+    "zensical (>=0.1.1,<0.2.0)"
 ]
 
 [tool.poetry]

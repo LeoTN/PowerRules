@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release Version (1.2.3 or 1.2.3b4)"
+        description: "Release version (1.2.3 or 1.2.3b4)"
         required: true
         type: string
 
@@ -583,3 +583,14 @@ jobs:
           else
               gh release create "$TAG_NAME" dist/* executables/* --title "$TAG_NAME" --generate-notes --target "$TARGET_SHA"
           fi
+
+  publish_docs:
+    name: Publish documentation
+    needs: [gather_details, github_release]
+    # Beta releases do not get their own documentation version
+    if: needs.gather_details.outputs.is_beta == 'false'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/docs.yml
+    with:
+      version: ${{ needs.gather_details.outputs.new_version }}
