@@ -46,6 +46,9 @@ features = [
   "content.code.annotate",
 ]
 
+[project.extra.version]
+provider = "mike"
+
 # https://zensical.org/docs/setup/colors/?h=dark+mode#automatic-light-dark-mode
 # Palette toggle for automatic mode
 [[project.theme.palette]]

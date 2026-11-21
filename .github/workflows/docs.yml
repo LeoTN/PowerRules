@@ -1,0 +1,144 @@
+name: Deploy documentation
+
+on:
+    # Called by release.yml after a normal (non-beta) release was published
+    workflow_call:
+        inputs:
+            version:
+                description: "Release version (1.2.3), deployed with the alias latest"
+                required: true
+                type: string
+
+    # Manual deployment of a release version or of the development documentation
+    workflow_dispatch:
+        inputs:
+            version:
+                description: "Release version (1.2.3) or development"
+                required: true
+                type: string
+
+    push:
+        branches:
+            - development
+        paths:
+            - "zensical/**"
+            - ".github/workflows/docs.yml"
+
+permissions:
+    contents: read
+
+# Two deployments must not push to the gh-pages branch at the same time
+concurrency:
+    group: docs
+    cancel-in-progress: false
+
+env:
+    # Release versions can only be deployed from the stable branch, the development documentation only from the development branch
+    STABLE_RELEASE_BRANCH: "main"
+    DEVELOPMENT_BRANCH: "development"
+    DEVELOPMENT_VERSION: "development"
+    CONFIG_FILE: "zensical/zensical.toml"
+    # Zensical-compatible fork of mike (it is not published on PyPI), pinned to a full commit SHA
+    MIKE_REF: "2d4ad799442f4592db8ad53b179bfb33db8c69ac"
+
+jobs:
+    deploy_docs:
+        name: Deploy documentation
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - name: Determine version and aliases
+              id: target
+              env:
+                  EVENT_NAME: ${{ github.event_name }}
+                  INPUT_VERSION: ${{ inputs.version }}
+                  REF_NAME: ${{ github.ref_name }}
+              run: |
+                  # A push always deploys the development documentation, otherwise the version is given by the caller
+                  if [[ "$EVENT_NAME" == "push" ]]; then
+                      VERSION=$DEVELOPMENT_VERSION
+                  else
+                      VERSION="$INPUT_VERSION"
+                  fi
+
+                  if [[ "$VERSION" == "$DEVELOPMENT_VERSION" ]]; then
+                      if [[ "$REF_NAME" != "$DEVELOPMENT_BRANCH" ]]; then
+                          echo "[ERROR] The development documentation can only be deployed from the '$DEVELOPMENT_BRANCH' branch (current ref: $REF_NAME)"
+                          exit 1
+                      fi
+
+                      echo "[INFO] Deploying the development documentation"
+                      echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+                      echo "is_stable_release=false" >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
+
+                  if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                      echo "[ERROR] Invalid version: $VERSION (use X.Y.Z or $DEVELOPMENT_VERSION)"
+                      exit 1
+                  fi
+
+                  # Same rule as for the release itself, so unreleased changes never end up in a release version
+                  if [[ "$REF_NAME" != "$STABLE_RELEASE_BRANCH" ]]; then
+                      echo "[ERROR] Release versions can only be deployed from the '$STABLE_RELEASE_BRANCH' branch (current ref: $REF_NAME)"
+                      exit 1
+                  fi
+
+                  echo "[INFO] Deploying the documentation of version $VERSION as latest"
+                  echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+                  echo "is_stable_release=true" >> "$GITHUB_OUTPUT"
+
+            - name: Checkout repository
+              uses: actions/checkout@v6
+
+            # https://github.com/actions/setup-python/blob/v7/docs/advanced-usage.md#caching-packages
+            - name: Install poetry
+              run: |
+                  pipx install poetry==2.4.1
+
+            - name: Set up Python
+              uses: actions/setup-python@v7
+              with:
+                  python-version: "3.13"
+                  cache: "poetry"
+
+            - name: Install dependencies
+              # Zensical is a development dependency, PowerRules itself is not needed to build the documentation
+              run: |
+                  poetry sync --no-root
+
+            - name: Install mike
+              run: |
+                  poetry run pip install "git+https://github.com/squidfunk/mike.git@${MIKE_REF}"
+
+            - name: Configure git identity
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            - name: Fetch the gh-pages branch
+              run: |
+                  # The branch does not exist before the first deployment
+                  git fetch origin gh-pages --depth=1 || echo "[INFO] No gh-pages branch found, it is created by the first deployment"
+
+            - name: Deploy documentation
+              env:
+                  VERSION: ${{ steps.target.outputs.version }}
+                  IS_STABLE_RELEASE: ${{ steps.target.outputs.is_stable_release }}
+              run: |
+                  mike_arguments=(deploy --config-file "$CONFIG_FILE" --push)
+
+                  # Only a stable release version becomes the new latest version
+                  if [[ "$IS_STABLE_RELEASE" == "true" ]]; then
+                      mike_arguments+=(--update-aliases "$VERSION" latest)
+                  else
+                      mike_arguments+=("$VERSION")
+                  fi
+
+                  poetry run mike "${mike_arguments[@]}"
+
+                  # Redirect the root of the site to latest
+                  if [[ "$IS_STABLE_RELEASE" == "true" ]]; then
+                      poetry run mike set-default --config-file "$CONFIG_FILE" --push latest
+                  fi
