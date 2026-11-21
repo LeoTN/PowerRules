@@ -45,6 +45,13 @@ flowchart TD
 | `--dry-run`          | off               | Evaluate the policy without running any action. Commands of command conditions still run.             |
 | `--no-require-trust` | off               | Run the policy even if it is not trusted or was modified since it was trusted, see [Trust](trust.md). |
 
+Rule options:
+
+| Option    | Default  | Description                                                                   |
+| --------- | -------- | ----------------------------------------------------------------------------- |
+| `name`    | required | Name of the rule, used in logs and environment variables.                     |
+| `enabled` | `true`   | `false` skips the rule during evaluation. [Trust](trust.md) is still checked. |
+
 ## Details
 
 - A rule runs its actions when it becomes the active match, not on every evaluation while it keeps matching. If another rule or no rule matches in between, the rule runs its actions again the next time it matches.

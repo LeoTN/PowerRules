@@ -38,7 +38,7 @@ Only windows with a non-empty title are checked. Minimized windows are included.
 | Linux    | An X11 session with a window manager which provides a window list. Wayland is not supported.                                                        |
 | macOS    | The screen recording permission is required.                                                                                                        |
 
-If a requirement is not met, window conditions may not be evaluated correctly and/or the evaluation stops.
+If a requirement is not met, window conditions cannot be evaluated and the evaluation stops.
 
 ## Related
 

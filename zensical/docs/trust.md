@@ -2,7 +2,7 @@
 
 !!! abstract "Summary"
 
-    PowerRules remembers which policies you trust. Every modification of a policy or of its `trusted_files` makes it untrusted until you and trust it again.
+    PowerRules remembers which policies you trust. Every modification of a policy or of its `trusted_files` makes it untrusted until you trust it again.
 
 ## Example
 
