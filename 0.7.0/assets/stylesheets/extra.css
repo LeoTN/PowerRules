@@ -1,0 +1,27 @@
+/* Make links in grid cards expand to allow clicking anywhere on the card to follow the link */
+.md-typeset .grid.cards > ul > li {
+  position: relative;
+}
+.md-typeset .grid.cards > ul > li a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+/* Never break inline code in table cells */
+.md-typeset table:not([class]) code {
+  white-space: nowrap;
+}
+
+/* Small label next to an option, e.g. for options which only exist for actions */
+.option-tag {
+  display: inline-block;
+  padding: 0 0.5em;
+  border-radius: 0.2rem;
+  font-size: 0.7em;
+  font-weight: 700;
+  vertical-align: middle;
+  white-space: nowrap;
+  background-color: var(--md-default-fg-color--lightest);
+  color: var(--md-default-fg-color--light);
+}
