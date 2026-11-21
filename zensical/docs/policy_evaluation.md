@@ -1,4 +1,4 @@
-# Policy evaluation
+# Policy Evaluation
 
 !!! abstract "Summary"
 
@@ -20,7 +20,7 @@ pwru policy run --once
 pwru policy run --dry-run
 ```
 
-## Evaluation flow
+## Evaluation Flow
 
 ``` mermaid
 flowchart TD

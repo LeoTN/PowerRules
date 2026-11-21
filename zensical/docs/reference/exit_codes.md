@@ -1,4 +1,4 @@
-# Exit codes
+# Exit Codes
 
 !!! abstract "Summary"
 
@@ -27,7 +27,7 @@ ERROR    Policy file not found: /path/to/missing.yaml
 2
 ```
 
-## Exit codes
+## Codes
 
 --8<-- "admonitions.md:contributions_welcome"
 
