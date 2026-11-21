@@ -8,15 +8,14 @@
 
 ``` yaml
 rules:
-  # Match while a window title starts with "Firefox" (case-insensitive)
+  # Match while a window title contains "Mozilla Firefox" (case-sensitive)
   - name: "Firefox window is open"
     conditions:
       window:
-        title: "Firefox.*"
+        title: "Mozilla Firefox"
         exists: true
         match:
-          type: regex
-          case_sensitive: false
+          type: contains
     actions:
       - run: "echo Firefox window is open"
 ```

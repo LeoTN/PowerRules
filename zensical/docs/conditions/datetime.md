@@ -27,23 +27,23 @@ rules:
 More examples:
 
 ``` yaml
-# Every day from 23:00 until 1:30 the next morning
+# Match every day from 23:00 until 1:30 the next morning
 - datetime:
     between:
       start: "23"
       end: "1:30"
 
-# Mondays and Fridays
+# Match on Mondays and Fridays
 - datetime:
     weekday: ["Monday", "Friday"]
 
-# The whole days 2026-08-21 and 2026-08-22
+# Match on the whole days 2026-08-21 and 2026-08-22
 - datetime:
     between:
       start: "2026-08-21"
       end: "2026-08-23"
 
-# From 2026-08-21 18:00 until 2026-08-23 6:00
+# Match from 2026-08-21 18:00 until 2026-08-23 6:00
 - datetime:
     between:
       start: "2026-08-21 18:00"

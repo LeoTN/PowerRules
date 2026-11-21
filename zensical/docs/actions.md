@@ -6,44 +6,91 @@
 
 ## Example
 
-``` yaml
-rules:
-  - name: "Nightly backup"
-    conditions:
-      datetime:
-        between:
-          start: "23"
-          end: "1:30"
-    actions:
-      # A failing backup does not prevent the remaining actions
-      - name: "Backup"
-        run: "backup.sh"
-        shell: bash
-        working_directory: scripts # Relative to the policy file
-        env:
-          TARGET: "/mnt/backup"
-        timeout: 600
-        success_exit_codes: [0, 3]
-        continue_on_error: true
-        trusted_files:
-          - scripts/backup.sh # Relative to the policy file (not to working_directory)
+=== "Windows"
 
-      # Fail if the output does not contain "success"
-      - name: "Check"
-        run: "check.sh"
-        shell: bash
-        stdout:
-          value: "success"
-          match:
-            type: contains
+    ``` yaml
+    rules:
+      # Match every night from 23:00 until 1:30
+      - name: "Backup time"
+        conditions:
+          datetime:
+            between:
+              start: "23"
+              end: "1:30"
+        actions:
+          # A failing backup does not prevent the remaining actions
+          - name: "Backup"
+            run: '.\my-action.ps1'
+            working_directory: scripts # Relative to the policy file
+            env:
+              TARGET: 'D:\backup'
+            timeout: 600
+            success_exit_codes: [0, 3]
+            continue_on_error: true
+            trusted_files:
+              - scripts/my-action.ps1 # Relative to the policy file (not to working_directory)
 
-      # Start a command in the background without waiting for it
-      - run: "notify.sh"
-        shell: bash
-        wait: false
-        trusted_files:
-          - scripts/notify.sh
-```
+          # Fail if the output does not contain "Notification service is ready"
+          - name: "Check"
+            run: '.\my-check.ps1'
+            working_directory: scripts
+            stdout:
+              value: "Notification service is ready"
+              match:
+                type: contains
+            trusted_files:
+              - scripts/my-check.ps1
+
+          # Start a command in the background without waiting for it
+          - run: '.\my-notification.ps1'
+            working_directory: scripts
+            wait: false
+            trusted_files:
+              - scripts/my-notification.ps1
+    ```
+
+=== "Linux & macOS"
+
+    ``` yaml
+    rules:
+      # Match every night from 23:00 until 1:30
+      - name: "Backup time"
+        conditions:
+          datetime:
+            between:
+              start: "23"
+              end: "1:30"
+        actions:
+          # A failing backup does not prevent the remaining actions
+          - name: "Backup"
+            run: "./my-action.sh"
+            working_directory: scripts # Relative to the policy file
+            env:
+              TARGET: "/mnt/backup"
+            timeout: 600
+            success_exit_codes: [0, 3]
+            continue_on_error: true
+            trusted_files:
+              - scripts/my-action.sh # Relative to the policy file (not to working_directory)
+
+          # Fail if the output does not contain "Notification service is ready"
+          - name: "Check"
+            run: "./my-check.sh"
+            working_directory: scripts
+            stdout:
+              value: "Notification service is ready"
+              match:
+                type: contains
+            trusted_files:
+              - scripts/my-check.sh
+
+          # Start a command in the background without waiting for it
+          - run: "./my-notification.sh"
+            working_directory: scripts
+            wait: false
+            trusted_files:
+              - scripts/my-notification.sh
+    ```
 
 ## Options
 

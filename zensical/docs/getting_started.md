@@ -42,7 +42,8 @@ Create a file named `my-policy.yaml`:
 # yaml-language-server: $schema=https://raw.githubusercontent.com/LeoTN/PowerRules/main/assets/schema/powerrules_policy.schema.json
 # (1)!
 rules:
-  - name: "Demo rule"
+  # Match while no process named "powerrules-demo" is running
+  - name: "No demo process is running"
     conditions:
       process:
         name: "powerrules-demo"
@@ -53,8 +54,6 @@ rules:
 ```
 
 1. Editors with YAML support can use this schema for validation and autocompletion.
-
-The rule matches while no process named `powerrules-demo` is running.
 
 ### Validation
 
@@ -70,8 +69,7 @@ Review the policy and trust it:
 pwru trust add --policy my-policy.yaml
 ```
 
-PowerRules refuses to run policies which are not trusted or were modified since.  
-[Learn more about trust](trust.md)
+PowerRules refuses to run policies which are not trusted or were modified since, see [Trust](trust.md).
 
 ### Execution
 
@@ -86,7 +84,7 @@ INFO     Running policy 'my-policy.yaml' once...
 INFO     Policy '/path/to/my-policy.yaml' is trusted
 INFO     Running action 'Say hello'
 INFO     Action 'Say hello' finished with exit code 0
-INFO     Rule 'Demo rule' matched, executed actions: 'Say hello'
+INFO     Rule 'No demo process is running' matched, executed actions: 'Say hello'
 ```
 
 ## Related

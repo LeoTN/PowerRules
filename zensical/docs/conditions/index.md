@@ -17,11 +17,13 @@ rules:
               - "Saturday"
               - "Sunday"
         - process:
-            name: "backup.exe"
+            name: "backup" #(1)!
             exists: false
     actions:
-      - run: "echo No backup is running"
+      - run: "echo Weekend without backup"
 ```
+
+1. Consider using `contains` or `regex` matching for different platforms.
 
 Every rule has exactly one `conditions` entry. To check several things, combine them with a [logical condition](logical.md).
 

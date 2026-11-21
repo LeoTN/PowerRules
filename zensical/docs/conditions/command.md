@@ -6,26 +6,48 @@
 
 ## Example
 
-``` yaml
-rules:
-  # Match if the script exits with 0 or 2 and prints "successful" (case-insensitive)
-  - name: "Service is successful"
-    conditions:
-      command:
-        run: "check.sh"
-        shell: bash
-        working_directory: scripts # Relative to the policy file
-        success_exit_codes: [0, 2]
-        stdout:
-          value: "successful"
-          match:
-            type: contains
-            case_sensitive: false
-        trusted_files:
-          - scripts/check.sh # Relative to the policy file (not to working_directory)
-    actions:
-      - run: "echo Service is successful"
-```
+=== "Windows"
+
+    ``` yaml
+    rules:
+      # Match if the script exits with 0 or 2 and prints "successful" (case-sensitive)
+      - name: "Check is successful"
+        conditions:
+          command:
+            run: '.\my-check.ps1'
+            working_directory: scripts # Relative to the policy file
+            success_exit_codes: [0, 2]
+            stdout:
+              value: "successful"
+              match:
+                type: contains
+            trusted_files:
+              - scripts/my-check.ps1 # Relative to the policy file (not to working_directory)
+        actions:
+          - run: "echo Check is successful"
+    ```
+
+=== "Linux & macOS"
+
+    ``` yaml
+    rules:
+      # Match if the script exits with 0 or 2 and prints "successful" (case-insensitive)
+      - name: "Check is successful"
+        conditions:
+          command:
+            run: "./my-check.sh"
+            working_directory: scripts # Relative to the policy file
+            success_exit_codes: [0, 2]
+            stdout:
+              value: "successful"
+              match:
+                type: contains
+                case_sensitive: false
+            trusted_files:
+              - scripts/my-check.sh # Relative to the policy file (not to working_directory)
+        actions:
+          - run: "echo Check is successful"
+    ```
 
 ## Options
 

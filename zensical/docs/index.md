@@ -4,22 +4,43 @@ PowerRules is a rule-based command automation tool: when the conditions of a rul
 
 Originally built to shut down a computer at the right moment, it now runs any shell command.
 
-``` yaml
-rules:
-  # Shut down when no backup process is running between 23:00 and 01:30
-  - name: "Shutdown after nightly backup"
-    conditions:
-      and:
-        - process:
-            name: "backup.exe"
-            exists: false
-        - datetime:
-            between:
-              start: "23"
-              end: "1:30"
-    actions:
-      - run: "shutdown /s /t 0"
-```
+=== "Windows"
+
+    ``` yaml
+    rules:
+      # Match when no backup process is running between 23:00 and 01:30
+      - name: "Shutdown when no backup is running at night"
+        conditions:
+          and:
+            - process:
+                name: "backup.exe"
+                exists: false
+            - datetime:
+                between:
+                  start: "23"
+                  end: "1:30"
+        actions:
+          - run: "shutdown /s /t 0"
+    ```
+
+=== "Linux & macOS"
+
+    ``` yaml
+    rules:
+      # Match when no backup process is running between 23:00 and 01:30
+      - name: "Shutdown when no backup is running at night"
+        conditions:
+          and:
+            - process:
+                name: "backup"
+                exists: false
+            - datetime:
+                between:
+                  start: "23"
+                  end: "1:30"
+        actions:
+          - run: "shutdown -h now"
+    ```
 
 ## How it works
 

@@ -8,24 +8,38 @@
 
 ``` yaml
 rules:
-  # Match if (Firefox OR Chrome is running) AND NOT a backup is running
-  - name: "Browser without backup"
+  # Match in December or January, but not on weekends, while VLC is running
+  - name: "Winter weekday with VLC"
     conditions:
       and:
-        - or:
-            - process:
-                name: "firefox.exe"
-                exists: true
-            - process:
-                name: "chrome.exe"
-                exists: true
+        - or: #(1)!
+            - datetime:
+                month:
+                  - "December"
+            - datetime:
+                month:
+                  - "January"
         - not:
-            process:
-              name: "backup.exe"
-              exists: true
+            datetime:
+              weekday:
+                - "Saturday"
+                - "Sunday"
+        - process:
+            name: "vlc" #(2)!
+            exists: true
     actions:
-      - run: "echo Browser is running without a backup"
+      - run: "echo Winter weekday with VLC"
 ```
+
+1.  Using `or` like this is a more elaborate way of writing:
+
+    ``` yaml
+    month: ["December", "January"]
+    ```
+
+    but you get the idea.
+
+2.  Consider using `contains` or `regex` matching for different platforms.
 
 ## Options
 

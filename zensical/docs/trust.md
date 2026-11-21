@@ -24,10 +24,10 @@ Scripts and other files which commands depend on are not detected automatically.
 
 ``` yaml
 actions:
-  - run: "./backup.sh"
+  - run: "./my-action.sh"
     working_directory: scripts
     trusted_files:
-      - scripts/backup.sh # Relative to the policy file (not to working_directory)
+      - scripts/my-action.sh # Relative to the policy file (not to working_directory)
 ```
 
 ## Options

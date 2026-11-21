@@ -6,17 +6,33 @@
 
 ## Example
 
-``` yaml
-rules:
-  # Match while Firefox is running
-  - name: "Firefox is running"
-    conditions:
-      process:
-        name: "firefox.exe"
-        exists: true
-    actions:
-      - run: "echo Firefox is running"
-```
+=== "Windows"
+
+    ``` yaml
+    rules:
+      # Match while Firefox is running
+      - name: "Firefox is running"
+        conditions:
+          process:
+            name: "firefox.exe"
+            exists: true
+        actions:
+          - run: "echo Firefox is running"
+    ```
+
+=== "Linux & macOS"
+
+    ``` yaml
+    rules:
+      # Match while Firefox is running
+      - name: "Firefox is running"
+        conditions:
+          process:
+            name: "firefox"
+            exists: true
+        actions:
+          - run: "echo Firefox is running"
+    ```
 
 ## Options
 
