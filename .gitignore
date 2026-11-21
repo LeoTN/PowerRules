@@ -1,12 +1,19 @@
-.vscode/
+# Build artifacts and caches
 __pycache__/
+.pytest_cache/
+.ruff_cache/
+.vscode/
 dist/
-powerrules.yaml
 powerrules.log*
+powerrules.yaml
+
+# Zensical documentation site
+zensical/.cache/
+zensical/site
 
 # Nuitka artifacts
 *.build/
 *.dist/
 *.onefile-build/
-nuitka-crash-report.xml
 nuitka-compilation-report.xml
+nuitka-crash-report.xml

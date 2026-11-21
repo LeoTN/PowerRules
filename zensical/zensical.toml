@@ -1,0 +1,109 @@
+[project]
+site_name = "PowerRules"
+site_description = "A rule-based command automation tool."
+site_author = "LeoTN"
+site_url = "https://leotn.github.io/PowerRules/"
+repo_url = "https://github.com/LeoTN/PowerRules"
+repo_name = "LeoTN/PowerRules"
+
+docs_dir = "docs"
+site_dir = "site"
+
+# Do not directly include templates
+exclude_docs = """
+/templates/
+"""
+
+extra_css = ["assets/stylesheets/extra.css"]
+
+nav = [
+  { "Home" = "index.md" },
+  { "Getting Started" = "getting_started.md" },
+  { "Conditions" = [
+    { "Overview" = "conditions/index.md" },
+    { "Process" = "conditions/process.md" },
+    { "Window" = "conditions/window.md" },
+    { "Datetime" = "conditions/datetime.md" },
+    { "Command" = "conditions/command.md" },
+    { "Logical" = "conditions/logical.md" },
+  ] },
+  { "Actions" = "actions.md" },
+  { "Policy Evaluation" = "policy_evaluation.md" },
+  { "Trust" = "trust.md" },
+  { "Reference" = [
+    { "Match Types" = "reference/match_types.md" },
+    { "Command Options" = "reference/command_options.md" },
+    { "Logging" = "reference/logging.md" },
+    { "Exit Codes" = "reference/exit_codes.md" },
+  ] },
+]
+
+[project.theme]
+features = [
+  "navigation.instant",
+  "navigation.top",
+  "content.code.copy",
+  "content.code.annotate",
+]
+
+[project.extra.version]
+provider = "mike"
+
+# https://zensical.org/docs/setup/colors/?h=dark+mode#automatic-light-dark-mode
+# Palette toggle for automatic mode
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+# Palette toggle for light mode
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+# Palette toggle for dark mode
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+# Reusable content
+[project.markdown_extensions.pymdownx.snippets]
+base_path = ["zensical/snippets"]
+# Fail if a snippet is missing
+check_paths = true
+
+# Default extension list
+[project.markdown_extensions]
+abbr = {}
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+toc.permalink = true
+pymdownx.arithmatex.generic = true
+pymdownx.betterem = {}
+pymdownx.caret = {}
+pymdownx.details = {}
+pymdownx.emoji.emoji_generator = "zensical.extensions.emoji.to_svg"
+pymdownx.emoji.emoji_index = "zensical.extensions.emoji.twemoji"
+pymdownx.highlight.anchor_linenums = true
+pymdownx.highlight.line_spans = "__span"
+pymdownx.highlight.pygments_lang_class = true
+pymdownx.inlinehilite = {}
+pymdownx.keys = {}
+pymdownx.magiclink = {}
+pymdownx.mark = {}
+pymdownx.smartsymbols = {}
+# pymdownx.snippets.base_path = "includes"
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+pymdownx.tabbed.alternate_style = true
+pymdownx.tabbed.combine_header_slug = true
+pymdownx.tasklist.custom_checkbox = true
+pymdownx.tilde = {}
