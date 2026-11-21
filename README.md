@@ -7,7 +7,7 @@
   [![latest-beta-version](https://img.shields.io/github/v/release/LeoTN/PowerRules?&include_prereleases&filter=*.*.*b*&display_name=release&style=for-the-badge&logo=Textpattern&logoColor=orange&label=LATEST%20BETA&color=orange)](https://github.com/LeoTN/PowerRules/releases)
   [![license](https://img.shields.io/github/license/LeoTN/PowerRules?&style=for-the-badge&logo=Google%20Docs&logoColor=blue&label=License&color=blue)](https://github.com/LeoTN/PowerRules/blob/main/LICENSE)
 
-  [**Documentation**](https://leotn.github.io/PowerRules/) · [**Getting started**](https://leotn.github.io/PowerRules/getting_started/)
+  [**Documentation**](https://leotn.github.io/PowerRules/latest/) · [**Getting started**](https://leotn.github.io/PowerRules/latest/getting_started/)
 </div>
 
 ## About
