@@ -1,4 +1,4 @@
-# Command options
+# Command Options
 
 !!! abstract "Summary"
 
